@@ -6,6 +6,12 @@
 
 数据来自 PC 上的 [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)（下称 LHM）的 Web 接口，通过局域网 HTTP 拉取，**PC 端不用装任何客户端或驱动**。
 
+<p align="center">
+  <img src="docs/preview.png" alt="界面预览" width="400">
+</p>
+
+*编辑风界面（代码里的 `UI_STYLE 3`）。默认编译的是 5 页轮播版（`UI_STYLE 4`），配色和排版一致，布局不同。*
+
 > 仓库内不含任何 WiFi 账号或密码。首次使用请复制 `secrets.example.h` 为 `secrets.h` 填入自己的 WiFi，或烧录后用 `wifi_manager.html` 串口配网。
 
 ---
@@ -204,6 +210,8 @@ Chrome / Edge 打开 `firmware/esp32_monitor_hal/wifi_manager.html`：
 │  ├─ start-monitor.bat           # 提权、放行防火墙、启动 LHM + 广播
 │  ├─ lhm_beacon.ps1              # UDP 8099 广播本机 IP
 │  └─ lhm_beacon.vbs              # 无窗口启动上面的 ps1
+├─ docs/
+│  └─ preview.png                 # 界面预览图
 └─ .github/workflows/build.yml    # push / tag 时自动编译固件
 ```
 
