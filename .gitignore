@@ -1,0 +1,17 @@
+# 本地 WiFi 账号（由 secrets.example.h 复制而来，绝不提交）
+secrets.h
+firmware/**/secrets.h
+
+# 编译产物
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

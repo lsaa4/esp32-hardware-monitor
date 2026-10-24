@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32-S3 副屏 · WiFi 配置</title>
+<style>
+  :root{
+    --bg:#0a0e13; --card:#111a22; --line:#1e2b36; --txt:#e8edf2;
+    --dim:#6b7a89; --acc:#ff2d6f; --ok:#2ee6a0; --warn:#ffb300;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:28px 16px; background:var(--bg); color:var(--txt);
+    font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    display:flex; justify-content:center;
+  }
+  .wrap{width:100%; max-width:560px}
+  h1{font-size:19px; margin:0 0 4px; letter-spacing:.5px}
+  .sub{color:var(--dim); font-size:12px; margin-bottom:18px}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; margin-bottom:14px;
+  }
+  .row{display:flex; align-items:center; gap:10px}
+  button{
+    background:transparent; color:var(--txt); border:1px solid var(--line);
+    border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer;
+    transition:.15s; font-family:inherit;
+  }
+  button:hover:not(:disabled){border-color:var(--acc); color:var(--acc)}
+  button:disabled{opacity:.35; cursor:not-allowed}
+  button.primary{background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600}
+  button.primary:hover:not(:disabled){filter:brightness(1.12); color:#fff}
+  .dot{width:8px; height:8px; border-radius:50%; background:#333; flex:none}
+  .dot.on{background:var(--ok); box-shadow:0 0 8px var(--ok)}
+  .muted{color:var(--dim); font-size:12px}
+  .kv{display:grid; grid-template-columns:88px 1fr; gap:4px 10px; font-size:13px}
+  .kv b{color:var(--dim); font-weight:400}
+  .net{
+    display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px;
+    cursor:pointer; border:1px solid transparent;
+  }
+  .net:hover{background:#16202a}
+  .net.sel{border-color:var(--acc); background:#1a1119}
+  .net .name{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .lock{color:var(--dim); font-size:11px}
+  .bars{display:flex; align-items:flex-end; gap:2px; height:14px; flex:none}
+  .bars i{width:3px; background:#2c3a47; border-radius:1px}
+  .bars i.on{background:var(--ok)}
+  .bars i:nth-child(1){height:5px}
+  .bars i:nth-child(2){height:8px}
+  .bars i:nth-child(3){height:11px}
+  .bars i:nth-child(4){height:14px}
+  input[type=password], input[type=text]{
+    width:100%; background:#0d141a; border:1px solid var(--line); color:var(--txt);
+    border-radius:8px; padding:9px 12px; font-size:14px; outline:none; font-family:inherit;
+  }
+  input:focus{border-color:var(--acc)}
+  .list{max-height:250px; overflow:auto; margin-top:10px}
+  #log{
+    font:12px/1.7 Consolas,Menlo,monospace; color:var(--dim);
+    max-height:120px; overflow:auto; white-space:pre-wrap; word-break:break-all;
+  }
+  .hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ESP32-S3 副屏 · WiFi 配置</h1>
+  <div class="sub">通过 USB 串口修改板子要连的 WiFi。需要 Chrome / Edge 89+</div>
+
+  <div class="card">
+    <div class="row">
+      <span class="dot" id="dot"></span>
+      <span id="connTxt" class="muted">串口未连接</span>
+      <span style="flex:1"></span>
+      <button id="btnConn" class="primary">连接串口</button>
+      <button id="btnDisc" disabled>断开</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="kv">
+      <b>当前状态</b><span id="st">—</span>
+      <b>WiFi</b><span id="ssid">—</span>
+      <b>IP</b><span id="ip">—</span>
+      <b>信号</b><span id="rssi">—</span>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="btnStatus" disabled>刷新状态</button>
+      <button id="btnForget" disabled>忘记此 WiFi</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <b style="font-weight:600">附近的 WiFi</b>
+      <span style="flex:1"></span>
+      <button id="btnScan" disabled>扫描</button>
+    </div>
+    <div class="list" id="list"><div class="muted" style="padding:10px">点「扫描」获取列表</div></div>
+  </div>
+
+  <div class="card" id="panel" style="display:none">
+    <div class="muted" style="margin-bottom:8px">已选：<span id="selName" style="color:var(--acc)"></span></div>
+    <input type="password" id="pass" placeholder="WiFi 密码（开放网络留空）" autocomplete="off">
+    <div class="row" style="margin-top:12px">
+      <button id="btnJoin" class="primary">连接</button>
+      <span class="muted" id="joinTip"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="muted" style="margin-bottom:6px">日志</div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let port = null, reader = null, writer = null, reading = false, buf = '';
+let selSsid = null;
+
+function log(s){
+  const el = $('#log');
+  el.textContent += (new Date().toLocaleTimeString()) + '  ' + s + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+function setConnected(on){
+  $('#dot').classList.toggle('on', on);
+  $('#connTxt').textContent = on ? '串口已连接' : '串口未连接';
+  $('#btnConn').disabled = on;
+  $('#btnDisc').disabled = !on;
+  ['#btnStatus','#btnForget','#btnScan'].forEach(s => $(s).disabled = !on);
+}
+
+async function connect(){
+  if (!('serial' in navigator)) {
+    alert('这个浏览器不支持 Web Serial，请用 Chrome 或 Edge');
+    return;
+  }
+  try{
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    reading = true;
+    readLoop();
+    setConnected(true);
+    log('串口已打开');
+    setTimeout(()=>send('STATUS'), 300);
+  }catch(e){
+    log('打开失败: ' + e.message);
+  }
+}
+
+async function disconnect(){
+  reading = false;
+  try{ if(reader) await reader.cancel(); }catch(e){}
+  try{ if(writer){ writer.releaseLock(); writer = null; } }catch(e){}
+  try{ if(port){ await port.close(); port = null; } }catch(e){}
+  setConnected(false);
+  log('串口已断开');
+}
+
+async function send(cmd){
+  if(!writer) return;
+  const data = new TextEncoder().encode(cmd + '\n');
+  await writer.write(data);
+  log('→ ' + cmd.replace('\t','<TAB>'));
+}
+
+async function readLoop(){
+  const dec = new TextDecoder();
+  while(port && port.readable && reading){
+    reader = port.readable.getReader();
+    try{
+      while(true){
+        const {value, done} = await reader.read();
+        if(done) break;
+        buf += dec.decode(value, {stream:true});
+        let i;
+        while((i = buf.indexOf('\n')) >= 0){
+          const line = buf.slice(0, i).replace(/\r$/,'');
+          buf = buf.slice(i+1);
+          handleLine(line);
+        }
+      }
+    }catch(e){
+      if(reading) log('读取中断: ' + e.message);
+    }finally{
+      try{ reader.releaseLock(); }catch(e){}
+    }
+  }
+}
+
+function handleLine(line){
+  if(!line) return;
+  if(line[0] !== '#'){
+    // 板子的常规遥测日志，忽略
+    return;
+  }
+  const sp = line.indexOf(' ');
+  const tag = sp < 0 ? line : line.slice(0, sp);
+  const body = sp < 0 ? '' : line.slice(sp+1);
+  let obj = null;
+  try{ obj = JSON.parse(body); }catch(e){ log('解析失败: ' + line); return; }
+
+  if(tag === '#STATUS'){
+    $('#st').textContent = obj.connected ? '已连接' : '未连接';
+    $('#ssid').textContent = obj.ssid || '—';
+    $('#ip').textContent = obj.ip || '—';
+    $('#rssi').textContent = obj.connected ? obj.rssi + ' dBm' : '—';
+  }
+  else if(tag === '#SCAN'){
+    renderNets(obj.nets || []);
+  }
+  else if(tag === '#OK'){
+    log('成功 ' + (obj.ip ? 'IP=' + obj.ip : (obj.msg||'')));
+    $('#joinTip').textContent = obj.ip ? '已连接 ' + obj.ip : '';
+    setTimeout(()=>send('STATUS'), 500);
+  }
+  else if(tag === '#ERR'){
+    log('失败 ' + (obj.msg||''));
+    $('#joinTip').textContent = obj.msg || '失败';
+  }
+}
+
+function bars(rssi){
+  const lv = rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -78 ? 2 : 1;
+  let h = '';
+  for(let i=1;i<=4;i++) h += '<i class="' + (i<=lv?'on':'') + '"></i>';
+  return '<span class="bars">' + h + '</span>';
+}
+
+function renderNets(nets){
+  // 同名取最强
+  const map = new Map();
+  for(const n of nets){
+    if(!n.s) continue;
+    if(!map.has(n.s) || map.get(n.s).r < n.r) map.set(n.s, n);
+  }
+  const arr = [...map.values()].sort((a,b)=>b.r-a.r);
+  const el = $('#list');
+  if(!arr.length){ el.innerHTML = '<div class="muted" style="padding:10px">没扫到网络</div>'; return; }
+  el.innerHTML = arr.map(n =>
+    `<div class="net" data-ssid="${encodeURIComponent(n.s)}">
+       ${bars(n.r)}
+       <span class="name">${escapeHtml(n.s)}</span>
+       <span class="lock">${n.e ? '🔒' : '开放'}</span>
+       <span class="muted">${n.r}</span>
+     </div>`).join('');
+  el.querySelectorAll('.net').forEach(d => d.onclick = () => {
+    el.querySelectorAll('.net').forEach(x => x.classList.remove('sel'));
+    d.classList.add('sel');
+    selSsid = decodeURIComponent(d.dataset.ssid);
+    $('#panel').style.display = 'block';
+    $('#selName').textContent = selSsid;
+    $('#pass').value = '';
+    $('#pass').focus();
+  });
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+$('#btnConn').onclick = connect;
+$('#btnDisc').onclick = disconnect;
+$('#btnStatus').onclick = () => send('STATUS');
+$('#btnScan').onclick = () => { $('#list').innerHTML = '<div class="muted" style="padding:10px">扫描中…（约 3 秒）</div>'; send('SCAN'); };
+$('#btnForget').onclick = () => { if(confirm('清除板子里保存的 WiFi？')) send('FORGET'); };
+$('#btnJoin').onclick = () => {
+  if(!selSsid) return;
+  send('WIFI ' + selSsid + '\t' + $('#pass').value);
+  $('#joinTip').textContent = '正在连接…';
+};
+$('#pass').addEventListener('keydown', e => { if(e.key === 'Enter') $('#btnJoin').click(); });
+</script>
+</body>
+</html>
