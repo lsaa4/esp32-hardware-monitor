@@ -1,5 +1,7 @@
 # ESP32-S3 电脑状态副屏
 
+[![build](https://github.com/lsaa4/esp32-hardware-monitor/actions/workflows/build.yml/badge.svg)](https://github.com/lsaa4/esp32-hardware-monitor/actions/workflows/build.yml)
+
 一块 ESP32-S3 + ST7789 SPI 彩屏，把电脑的 CPU / GPU 温度、负载、频率、功耗，以及内存、硬盘、网速、电池做成一块**每 10 秒自动翻页的实时副屏**。
 
 数据来自 PC 上的 [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)（下称 LHM）的 Web 接口，通过局域网 HTTP 拉取，**PC 端不用装任何客户端或驱动**。
@@ -96,6 +98,8 @@ arduino-cli lib install ArduinoJson
 arduino-cli compile --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" `
   firmware/esp32_monitor_hal
 ```
+
+不想在本地装工具链也可以：每次 push 后 CI 会编译一遍，产物在 Actions 页面对应的 run 里（Artifacts → `firmware-<sha>.zip`，含 app / bootloader / partitions 三个 bin）。
 
 WiFi 二选一：
 
