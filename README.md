@@ -57,7 +57,7 @@
 | CS | GPIO41 |
 | BLK / BL | GPIO42（高电平点亮） |
 
-- 走硬件 SPI（FSPI），**20 MHz**。杜邦线上 40 MHz 会花屏，不建议提速。
+- 走硬件 SPI（FSPI），**80 MHz**：满屏填充实测 20.3 ms ≈ 49 fps（20 / 40 / 80 MHz 分别为 15 / 28 / 49 fps）。ESP32-S3 的 SPI 是整数分频，62.5 MHz 会被抹成 40 MHz，所以直接上 80；杜邦线太长或质量差时降回 40 MHz。
 - 屏幕原生 240×320 竖屏，代码里 `setRotation(3)` 转成 320×240 横屏。
 
 ## 快速开始
@@ -160,7 +160,7 @@ Chrome / Edge 打开 `firmware/esp32_monitor_hal/wifi_manager.html`：
 │ Monitor :8085│                          │  (每 1 秒)    │
 └──────┬───────┘                          └───────┬───────┘
        │                                          │
-       │  UDP 广播 :8099                          │ SPI 20MHz
+       │  UDP 广播 :8099                          │ SPI 80MHz
        │  "LHM|<ip>|8085|<主机名>"  每 2 秒        ▼
        └─────────────────────────────────►  ST7789 320×240
 ```
@@ -234,7 +234,7 @@ Chrome / Edge 打开 `firmware/esp32_monitor_hal/wifi_manager.html`：
 
 - 四个板子参数必须和上面完全一致（16 MB / OPI PSRAM / app3M_fat9M_16MB / CDC 关）。
 - 检查接线，尤其是 RST(45)、DC(40)、CS(41) 有没有接错。
-- SPI 降到 20 MHz（`TFT_hal.h` 里的 `TFT_FREQ`），杜邦线太长也会花屏。
+- 先把 `TFT_FREQ` 降到 40 MHz 或 20 MHz（`TFT_hal.h`）；杜邦线太长也会花屏。
 
 **串口没有日志**
 

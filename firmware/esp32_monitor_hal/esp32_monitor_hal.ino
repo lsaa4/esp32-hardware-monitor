@@ -51,6 +51,9 @@
 #define REFRESH_MS  1000
 #define PC_PORT     8085
 
+// 开机 SPI 扫频自检：1 = 打开（会闪 4 下白屏并打印各频率耗时），0 = 关闭
+#define PERF_SWEEP  0
+
 // 自动发现：PC 端 lhm_beacon.ps1 每 2 秒向本端口广播 "LHM|IP|端口|主机名"
 #define DISCOVERY_PORT 8099
 // ==========================================
@@ -1669,6 +1672,24 @@ void setup() {
   tft.init();
   Serial.println("[BOOT] tft.init done");
   tft.setRotation(3);
+
+#if PERF_SWEEP
+  // 开机扫一遍 SPI 时钟，打印各频率的真实全屏耗时（调试用，会闪 4 下白屏）
+  {
+    const uint32_t rates[] = {20000000UL, 40000000UL, 62500000UL, 80000000UL};
+    for (uint8_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++) {
+      tft.setFreq(rates[i]);
+      uint32_t t0 = micros();
+      tft.fillScreen(TFT_WHITE);
+      uint32_t us = micros() - t0;
+      Serial.printf("[PERF] %2lu MHz -> %5lu us  (%.1f fps)\n",
+                    (unsigned long)(rates[i] / 1000000UL), (unsigned long)us,
+                    us ? 1000000.0f / (float)us : 0.0f);
+    }
+    tft.setFreq(TFT_FREQ);   // 回到默认时钟
+  }
+#endif
+
   tft.fillScreen(C_BG);
   tft.setTextColor(C_WHITE, C_BG);
   tft.drawString("WiFi...", 10, 100, 4);

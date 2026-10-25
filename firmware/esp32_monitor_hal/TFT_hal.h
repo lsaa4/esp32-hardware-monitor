@@ -27,7 +27,9 @@
 #define TFT_RST  45
 #define TFT_BL   42
 
-#define TFT_FREQ 20000000UL      // 实测：40MHz 杜邦线已到极限，20MHz 稳定，全屏约 60ms
+// SPI 时钟。实测（320x240 满屏）：20MHz=15fps / 40MHz=28fps / 80MHz=49fps
+// 62.5MHz 会被 S3 的整数分频抹成 40MHz，所以直接上 80MHz。
+#define TFT_FREQ 80000000UL
 
 // ---------- 常用颜色（RGB565）----------
 #define TFT_BLACK   0x0000
@@ -101,6 +103,7 @@ public:
   // ---- 低层 ----
   void writecommand(uint8_t c) { cmd(c); }
   void writedata(uint8_t d)    { dat(d); }
+  void setFreq(uint32_t hz);   // 运行时切换 SPI 时钟（自检用）
 
 private:
   void cmd(uint8_t c);
@@ -142,13 +145,20 @@ inline void TFT_eSPI::setWindow(int32_t x, int32_t y, int32_t w, int32_t h) {
   cmd(0x2C);
 }
 
+inline void TFT_eSPI::setFreq(uint32_t hz) {
+  _tftSpi.endTransaction();
+  _tftSpi.beginTransaction(SPISettings(hz, MSBFIRST, SPI_MODE3));
+}
+
 inline void TFT_eSPI::pushColor(uint16_t color, uint32_t count) {
-  uint8_t buf[128];
-  for (int i = 0; i < 128; i += 2) { buf[i] = color >> 8; buf[i + 1] = color & 0xFF; }
+  // 一次推 2048 像素（4 KB），满屏只有 38 次 SPI 事务
+  static uint8_t buf[4096];
+  uint32_t chunk = (count > 2048) ? 2048 : count;
+  for (uint32_t i = 0; i < chunk * 2; i += 2) { buf[i] = color >> 8; buf[i + 1] = color & 0xFF; }
   digitalWrite(TFT_DC, HIGH);
   digitalWrite(TFT_CS, LOW);
   while (count) {
-    uint32_t n = (count > 64) ? 64 : count;
+    uint32_t n = (count > 2048) ? 2048 : count;
     _tftSpi.writeBytes(buf, n * 2);
     count -= n;
   }
