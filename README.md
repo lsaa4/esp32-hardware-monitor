@@ -177,7 +177,7 @@ Chrome / Edge 打开 `firmware/esp32_monitor_hal/wifi_manager.html`：
 2. 编译时的兜底地址 `PC_HOST`，默认 `192.168.137.1`（Windows 移动热点 / ICS 的固定网关，探测 1.2 秒）
 3. 监听 UDP 8099 广播，最长 8 秒，同网段优先，收到后探测 2.5 秒
 
-找到后写入 NVS。连续 5 次拉取失败（约 5 秒）会重新走一遍发现流程，所以 PC 换 IP 也能自己恢复。
+找到后写入 NVS。连续 5 次拉取失败（约 5 秒）会重新走一遍发现流程，所以 PC 换 IP 也能自己恢复；WiFi 断开时不会白跑这趟发现，等 WiFi 恢复后自动补一次。
 
 **为什么不用 TFT_eSPI**：TFT_eSPI 直接操作 SPI 外设寄存器，而 arduino-esp32 3.x 的 `SPIClass::begin()` 会延迟清零这些寄存器，实测 `tft.init()` 卡死、或初始化成功但推不出像素（白屏）。`TFT_hal.h` 保留了 TFT_eSPI 的类名和方法签名，底层改用 `SPIClass::writeBytes()`，再配一套 4 bit 抗锯齿字模。
 
@@ -229,8 +229,8 @@ Chrome / Edge 打开 `firmware/esp32_monitor_hal/wifi_manager.html`：
 **扫不到 WiFi / 连不上**
 
 - ESP32-S3 **只支持 2.4 GHz**，5 GHz 热点扫不到也连不上。
-- Windows 移动热点：认证方式是 WPA2/WPA3 混合，代码里已按「先 WPA2 关 PMF，失败再 WPA3」处理；另外热点没有设备连接时会自动关闭，先确认它还开着。
-- 密码输错也会写进 NVS，之后开机会一直重试失败。用网页上的「忘记此 WiFi」清掉再配。
+- Windows 移动热点：认证方式是 WPA2/WPA3 混合，代码里已按「先 WPA2 关 PMF，失败再 WPA3」处理（开机和串口配网都是两段式）；另外热点没有设备连接时会自动关闭，先确认它还开着。
+- 密码输错不会写进 NVS（连接成功才保存），板子会继续用原来的账号，网页上会显示失败原因（如 `4WAY_HANDSHAKE_TIMEOUT` = 密码错、`NO_AP_FOUND` = 信号/信道问题）。要换网或清掉已保存的账号，用网页上的「忘记此 WiFi」。
 
 **白屏 / 花屏**
 

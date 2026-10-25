@@ -131,6 +131,12 @@ Metrics m;
 uint32_t lastFetch = 0;
 uint8_t  failCount = 0;      // 连续失败次数，到 5 就重新自动发现
 
+// 当前要连的 WiFi：boot 时从 NVS / 固件宏读，串口配网时更新
+String   gWifiSsid;
+String   gWifiPass;
+bool     gUserWifi     = false;  // 串口改过 WiFi：boot 的两段式连接不要再用旧账号去试
+bool     gNeedDiscover = false;  // WiFi 起来后要补一次数据源发现
+
 // ---------------- JSON 解析 ----------------
 // LHM 的 data.json 是树：root → 硬件 → 传感器
 // 只按 Text 名字找，不依赖索引，换硬件也不用改代码
@@ -291,6 +297,8 @@ void walkSensors(JsonVariant v, Metrics& out, int depth, const char* hw, const c
 // ---------------- 主机自动发现 ----------------
 // 三层策略：NVS 缓存 → 代码兜底 IP → 监听 UDP 广播
 
+static void serialPoll();   // 见「串口配网协议」：发现期间也要能响应配网命令
+
 // 探测某个地址上是不是 LHM 的 data.json（HTTP 200 就算成功）
 static bool probeHost(const String& ip, uint16_t port, uint32_t timeoutMs) {
   WiFiClient c;
@@ -333,6 +341,7 @@ static bool listenBeacon(uint32_t waitMs, String& outIp, uint16_t& outPort) {
 
   uint32_t t0 = millis();
   while (millis() - t0 < waitMs) {
+    serialPoll();          // 别让 STATUS / 忘记此 WiFi 在发现期间卡满 8 秒
     int sz = udp.parsePacket();
     if (sz > 0) {
       char buf[96];
@@ -1580,9 +1589,130 @@ void drawOffline() {
 // 电脑浏览器通过 Web Serial 发命令，ESP32 用 #TAG {json} 回包
 //   STATUS          查询当前 WiFi 状态
 //   SCAN            扫描附近 WiFi
-//   WIFI <ssid>\t<pass>   保存并连接（用制表符分隔）
+//   WIFI <ssid>\t<pass>   连接（成功后写 NVS；失败不落盘）
 //   FORGET          清除保存的 WiFi
 static bool gBusy = false;
+
+#include <esp_wifi.h>
+
+// 最近一次断连原因（事件回调里记录，配网失败时回给网页）
+static volatile uint8_t gLastReason = 0;
+
+static const char* wifiReasonName(uint8_t r) {
+  switch (r) {
+    case 2:   return "AUTH_EXPIRE";
+    case 4:   return "ASSOC_EXPIRE";
+    case 15:  return "4WAY_HANDSHAKE_TIMEOUT";   // 密码错最常见的原因
+    case 200: return "BEACON_TIMEOUT";
+    case 201: return "NO_AP_FOUND";
+    case 202: return "AUTH_FAIL";
+    case 203: return "ASSOC_FAIL";
+    case 204: return "HANDSHAKE_TIMEOUT";
+    case 205: return "CONNECTION_FAIL";
+    default:  return "UNKNOWN";
+  }
+}
+
+// JSON 字符串转义：SSID 里可能有 " 或 \，不转义整条回包就 JSON.parse 失败
+static String jsonEscape(const String& s) {
+  String o;
+  o.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    switch (c) {
+      case '"':  o += "\\\""; break;
+      case '\\': o += "\\\\"; break;
+      case '\n': o += "\\n";  break;
+      case '\r': o += "\\r";  break;
+      case '\t': o += "\\t";  break;
+      default:
+        if ((uint8_t)c < 0x20) {
+          char b[7];
+          snprintf(b, sizeof(b), "\\u%04x", (unsigned)(uint8_t)c);
+          o += b;
+        } else {
+          o += c;
+        }
+    }
+  }
+  return o;
+}
+
+// 连接一个 AP。
+//
+// 绝对不能先 WiFi.disconnect(true)：它会 esp_wifi_stop() + esp_wifi_deinit()，
+// 之后的 esp_wifi_set_config / esp_wifi_connect 全部返回 ESP_ERR_WIFI_NOT_INIT，
+// 射频彻底死掉，只能重启恢复（重启后靠 NVS 里的账号"看起来又好了"）。
+// 这里只改配置 + connect，断开用 esp_wifi_disconnect()，射频始终保持在线。
+//
+// 返回值必须检查：不检查的话失败是完全静默的。
+static bool staConnect(const String& ssid, const String& pass, wifi_auth_mode_t auth) {
+  if (WiFi.getMode() != WIFI_MODE_STA) {   // 射频被关过（旧固件 / 手动 stop）→ 重新 init + start
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+  }
+  if (ssid.length() == 0 || ssid.length() > 32 || pass.length() > 64) {
+    Serial.printf("[WIFI] 参数非法 ssid=%u pass=%u\n",
+                  (unsigned)ssid.length(), (unsigned)pass.length());
+    return false;
+  }
+
+  // 驱动停在 connecting 时直接 set_config 会返回 ESP_ERR_WIFI_STATE
+  //（Arduino 的 WiFi.disconnect() 在"未连上"时会直接 return，并不会取消连接）
+  esp_wifi_disconnect();
+  delay(60);
+
+  wifi_config_t cfg = {};                   // 清零：短 SSID / 空密码自动补 0
+  memcpy(cfg.sta.ssid,     ssid.c_str(), ssid.length());
+  memcpy(cfg.sta.password, pass.c_str(), pass.length());
+  // 空密码 = 开放网络，阈值必须是 OPEN，否则永远连不上
+  cfg.sta.threshold.authmode = (pass.length() == 0) ? WIFI_AUTH_OPEN : auth;
+  // WPA3 必须要 PMF；WPA2 下关掉，兼容 Windows 软 AP 的 802.11w 问题
+  cfg.sta.pmf_cfg.capable    = (auth == WIFI_AUTH_WPA3_PSK);
+  cfg.sta.pmf_cfg.required   = false;
+
+  esp_err_t e = esp_wifi_set_config(WIFI_IF_STA, &cfg);
+  if (e == ESP_ERR_WIFI_STATE) {            // 还在 connecting：再掐一次，等一拍重试
+    esp_wifi_disconnect();
+    delay(200);
+    e = esp_wifi_set_config(WIFI_IF_STA, &cfg);
+  }
+  if (e != ESP_OK) {
+    Serial.printf("[WIFI] set_config 失败: %s\n", esp_err_to_name(e));
+    return false;
+  }
+
+  e = esp_wifi_connect();
+  if (e != ESP_OK) {
+    Serial.printf("[WIFI] connect 失败: %s\n", esp_err_to_name(e));
+    return false;
+  }
+  return true;
+}
+
+// WPA2 → WPA3 两段式：Windows 11 热点和普通路由是 WPA2（或 WPA2/WPA3 混合），
+// 纯 WPA3 路由只有第二次（SAE + PMF）能连上。
+static bool connectWithFallback(const String& ssid, const String& pass, uint32_t waitMs) {
+  if (ssid.length() == 0) return false;
+  if (pass.length() > 0 && pass.length() < 8) {   // WPA2/WPA3 都要求 8-64 位，别白等 8 秒
+    Serial.println("[WIFI] 密码长度必须 8-64 位，直接放弃");
+    return false;
+  }
+  gLastReason = 0;                                 // 只统计这次尝试的原因
+
+  staConnect(ssid, pass, WIFI_AUTH_WPA2_PSK);
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < waitMs) delay(100);
+  if (WiFi.status() == WL_CONNECTED) return true;
+  if (pass.length() == 0) return false;     // 开放网络没有第二种认证方式
+
+  Serial.printf("[WIFI] WPA2 超时，改试 WPA3(SAE)，status=%d reason=%d\n",
+                (int)WiFi.status(), (int)gLastReason);
+  staConnect(ssid, pass, WIFI_AUTH_WPA3_PSK);
+  t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < waitMs) delay(100);
+  return WiFi.status() == WL_CONNECTED;
+}
 
 static void sendTag(const char* tag, const String& body) {
   Serial.print(tag);
@@ -1591,11 +1721,12 @@ static void sendTag(const char* tag, const String& body) {
 }
 
 static void cmdStatus() {
+  bool on = (WiFi.status() == WL_CONNECTED);
   String j = "{\"connected\":";
-  j += (WiFi.status() == WL_CONNECTED) ? "true" : "false";
-  j += ",\"ssid\":\"" + WiFi.SSID() + "\"";
+  j += on ? "true" : "false";
+  j += ",\"ssid\":\"" + (on ? jsonEscape(WiFi.SSID()) : String("")) + "\"";
   j += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
-  j += ",\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0);
+  j += ",\"rssi\":" + String(on ? WiFi.RSSI() : 0);
   j += "}";
   sendTag("#STATUS", j);
 }
@@ -1612,9 +1743,15 @@ static void cmdScan() {
   // 驱动停在 connecting 状态时 scanNetworks() 会直接失败，返回负数，
   // 于是网页看到的永远是 {"nets":[]}（像是"附近没有 WiFi"，其实是没扫成）
   // 已经连上时不用断，直接扫即可；断了会白白掉线
+  if (WiFi.getMode() != WIFI_MODE_STA) {     // 射频被关过就重新打开，否则扫不出任何东西
+    WiFi.mode(WIFI_STA);
+    delay(200);
+  }
   bool wasOnline = (WiFi.status() == WL_CONNECTED);
   if (!wasOnline) {
-    WiFi.disconnect(false, false);
+    // 用 esp_wifi_disconnect()：Arduino 的 WiFi.disconnect() 在"未连上"时会直接 return，
+    // 取消不了正在进行的连接，扫描会被驱动拒绝
+    esp_wifi_disconnect();
     delay(120);
   }
 
@@ -1625,38 +1762,60 @@ static void cmdScan() {
     Serial.printf("[SCAN] attempt=%d result=%d status=%d\n", attempt, n, (int)WiFi.status());
   }
 
+  if (n < 0) {
+    // 扫描失败和"附近真没有 WiFi"要区分开，否则网页只会显示"没扫到网络"
+    Serial.printf("[SCAN] 失败 status=%d\n", (int)WiFi.status());
+    sendTag("#ERR", "{\"msg\":\"scan failed\"}");
+    WiFi.scanDelete();
+    gBusy = false;
+    drawStatic();
+    drawValues();
+    return;
+  }
+
   String j = "{\"nets\":[";
   for (int i = 0; i < n; i++) {
     if (i) j += ',';
-    String s = WiFi.SSID(i);
-    s.replace("\\", "\\\\");
-    s.replace("\"", "\\\"");
+    String s = jsonEscape(WiFi.SSID(i));
     j += "{\"s\":\"" + s + "\",\"r\":" + String(WiFi.RSSI(i)) +
          ",\"e\":" + String(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? 0 : 1) +
          ",\"a\":" + String((int)WiFi.encryptionType(i)) + "}";
-    Serial.printf("[SCAN]   %s  rssi=%d  auth=%d  ch=%d\n", s.c_str(), WiFi.RSSI(i),
+    Serial.printf("[SCAN]   %s  rssi=%d  auth=%d  ch=%d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i),
                   (int)WiFi.encryptionType(i), WiFi.channel(i));
   }
   j += "]}";
   WiFi.scanDelete();
   sendTag("#SCAN", j);
 
+  // 在线扫描偶尔会把连接扫掉，autoReconnect 又是关的，这里补一次
+  if (wasOnline && WiFi.status() != WL_CONNECTED && gWifiSsid.length() > 0) {
+    Serial.println("[SCAN] 扫描后掉线，重新连接");
+    staConnect(gWifiSsid, gWifiPass, WIFI_AUTH_WPA2_PSK);
+  }
+
   gBusy = false;
   drawStatic();
   drawValues();
 }
 
-static void staConnect(const String& ssid, const String& pass, wifi_auth_mode_t auth);   // 见文件末尾：带 WPA3/PMF 的连接
-
 static void cmdWifi(const String& arg) {
   int tab = arg.indexOf('\t');
-  String ssid = (tab > 0) ? arg.substring(0, tab) : arg;
-  String pass = (tab > 0) ? arg.substring(tab + 1) : "";
-  ssid.trim();
+  String ssid = (tab >= 0) ? arg.substring(0, tab) : arg;
+  String pass = (tab >= 0) ? arg.substring(tab + 1) : "";
+  // 不要 trim：SSID 允许首尾空格，网页选中的是扫描到的原样名字
   if (ssid.length() == 0) { sendTag("#ERR", "{\"msg\":\"empty ssid\"}"); return; }
+  if (ssid.length() > 32)  { sendTag("#ERR", "{\"msg\":\"ssid too long\"}"); return; }
+  if (pass.length() > 64)  { sendTag("#ERR", "{\"msg\":\"password too long\"}"); return; }
+  if (pass.length() > 0 && pass.length() < 8) {
+    sendTag("#ERR", "{\"msg\":\"password must be 8-64 chars\"}");   // 开放网络请留空
+    return;
+  }
 
-  prefs.putString("ssid", ssid);
-  prefs.putString("pass", pass);
+  gUserWifi = true;
+  String oldSsid = gWifiSsid;          // 换网失败要退回去，不能让板子一直对着错密码重试
+  String oldPass = gWifiPass;
+  gWifiSsid = ssid;
+  gWifiPass = pass;
 
   gBusy = true;
   tft.fillScreen(C_BG);
@@ -1665,26 +1824,15 @@ static void cmdWifi(const String& arg) {
   tft.setTextColor(C_ACC, C_BG);
   tft.drawString(ssid.c_str(), 20, 120, 2);
   tft.setTextColor(C_LABEL, C_BG);
-  tft.drawString("saved to flash", 20, 150, 1);
+  tft.drawString(pass.length() ? "trying WPA2 / WPA3..." : "open network", 20, 150, 1);
 
-  WiFi.disconnect(true);
-  delay(400);
+  // WPA2 → WPA3 两段式；每段最多 8 秒
+  bool ok = connectWithFallback(ssid, pass, 8000);
 
-  // 先按 WPA2 连（兼容 WPA2 / WPA2-WPA3 混合，Windows 软 AP 也能用）
-  staConnect(ssid, pass, WIFI_AUTH_WPA2_PSK);
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) { delay(200); }
-
-  // 还不行就按 WPA3(SAE) 再试一次，兼容纯 WPA3 路由
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[WIFI] WPA2 没连上，改试 WPA3");
-    staConnect(ssid, pass, WIFI_AUTH_WPA3_PSK);
-    t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 8000) { delay(200); }
-  }
-
-  bool ok = (WiFi.status() == WL_CONNECTED);
   if (ok) {
+    // 连上了才落盘：密码打错不会污染 NVS，重启还能回到原来的网
+    prefs.putString("ssid", ssid);
+    prefs.putString("pass", pass);
     String j = "{\"ip\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
     sendTag("#OK", j);
     tft.fillScreen(C_BG);
@@ -1692,15 +1840,32 @@ static void cmdWifi(const String& arg) {
     tft.drawString("CONNECTED", 20, 90, 4);
     tft.setTextColor(C_LABEL, C_BG);
     tft.drawString(WiFi.localIP().toString().c_str(), 20, 130, 2);
-    gHost = PC_HOST;
-    discoverHost();
+    // 交给 loop() 去发现：在这里同步跑 discoverHost() 会阻塞最多 9 秒，
+    // 期间网页发的 STATUS / FORGET 全部压着不动，看起来就是"点了没反应"
+    gNeedDiscover = true;
   } else {
-    sendTag("#ERR", "{\"msg\":\"connect failed\"}");
+    uint8_t r = gLastReason;
+    String msg = "connect failed: ";
+    msg += wifiReasonName(r);
+    msg += " (";
+    msg += String(r);
+    msg += ")";
+    sendTag("#ERR", "{\"msg\":\"" + msg + "\"}");
+    Serial.printf("[WIFI] 连接 %s 失败，status=%d reason=%d\n",
+                  ssid.c_str(), (int)WiFi.status(), (int)r);
     tft.fillScreen(C_BG);
     tft.setTextColor(C_RED, C_BG);
     tft.drawString("CONNECT FAIL", 20, 90, 4);
     tft.setTextColor(C_LABEL, C_BG);
-    tft.drawString("check password", 20, 130, 2);
+    tft.drawString("check password / signal", 20, 130, 1);
+
+    // 退回原来的账号：连接成功前 NVS 没被改，这里只要把内存里的目标改回去即可
+    gWifiSsid = oldSsid;
+    gWifiPass = oldPass;
+    if (gWifiSsid.length() > 0) {
+      Serial.println("[WIFI] 恢复原来的账号");
+      staConnect(gWifiSsid, gWifiPass, WIFI_AUTH_WPA2_PSK);
+    }
   }
   delay(1200);
 
@@ -1721,7 +1886,11 @@ static void serialPoll() {
         else if (buf == "FORGET") {
           prefs.remove("ssid");
           prefs.remove("pass");
+          gWifiSsid = "";
+          gWifiPass = "";
+          esp_wifi_disconnect();          // 断开当前连接，但射频保持在线（还能扫描/重配）
           sendTag("#OK", "{\"msg\":\"forgotten\"}");
+          drawOffline();                  // 屏幕上给个反馈，否则看起来像没生效
         }
         else if (buf.startsWith("WIFI ")) cmdWifi(buf.substring(5));
         buf = "";
@@ -1733,21 +1902,8 @@ static void serialPoll() {
 }
 
 // ---------------- 主流程 ----------------
-
-// Windows 11 移动热点是 WPA2/WPA3 混合（auth=7），默认按 WPA2 去连会在认证阶段被踢
-// （reason=2 AUTH_EXPIRE）。这里显式允许 WPA3 并开启 PMF（capable 但不强制）。
-#include <esp_wifi.h>
-static void staConnect(const String& ssid, const String& pass, wifi_auth_mode_t auth) {
-  wifi_config_t cfg = {};
-  strncpy((char*)cfg.sta.ssid, ssid.c_str(), sizeof(cfg.sta.ssid) - 1);
-  strncpy((char*)cfg.sta.password, pass.c_str(), sizeof(cfg.sta.password) - 1);
-  cfg.sta.threshold.authmode = auth;
-  // WPA3 必须要 PMF；WPA2 下关掉，兼容 Windows 软 AP 的 802.11w 问题
-  cfg.sta.pmf_cfg.capable      = (auth == WIFI_AUTH_WPA3_PSK);
-  cfg.sta.pmf_cfg.required     = false;
-  esp_wifi_set_config(WIFI_IF_STA, &cfg);
-  esp_wifi_connect();
-}
+// WiFi 连接相关的底层函数（staConnect / connectWithFallback）在「串口配网协议」一节，
+// 因为配网命令和开机流程共用它们。
 
 void setup() {
   Serial.begin(115200);
@@ -1785,39 +1941,51 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   // 国家码设成 CN：允许 1-13 信道发射。
-  // 默认国家码会把 12/13 当"只能被动扫描"的信道，热 点落在这两个信道上时
+  // 默认国家码会把 12/13 当"只能被动扫描"的信道，热点落在这两个信道上时
   // 就会表现成"搜得到但连不上"（认证帧发不出去，reason=2 AUTH_EXPIRE）
   {
     wifi_country_t cn = {};
     strcpy(cn.cc, "CN");
     cn.schan = 1; cn.nchan = 13;
-    cn.max_tx_power = 20;
+    // 注意单位是 0.25 dBm，不是 dBm：映射表 {20,5} 即 20 → 5 dBm。
+    // 原来写 20 等于把发射功率压到 1/16，远一点就连不上/掉线。
+    cn.max_tx_power = 80;              // 80 * 0.25 = 20 dBm
     cn.policy = WIFI_COUNTRY_POLICY_MANUAL;
-    esp_wifi_set_country(&cn);
+    esp_err_t e = esp_wifi_set_country(&cn);
+    if (e != ESP_OK) Serial.printf("[BOOT] set_country 失败: %s\n", esp_err_to_name(e));
+    esp_wifi_set_max_tx_power(80);     // 再显式设一次，确保不被 PHY 默认值盖回去
   }
   WiFi.setSleep(false);              // 关省电，否则 HTTP 延迟忽高忽低
   WiFi.setAutoReconnect(false);      // 改用 loop() 里自己的 5 秒节流重连，避免驱动卡在 connecting
 
-  // 断连原因诊断：4=CONNECT_FAIL 15=4WAY_HANDSHAKE_TIMEOUT(密码错) 201=NO_AP_FOUND 205=CONNECTION_FAIL
+  // 断连原因诊断：15=4WAY_HANDSHAKE_TIMEOUT(密码错) 201=NO_AP_FOUND 2=AUTH_EXPIRE
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-    Serial.printf("[WIFI-EVT] event=%d reason=%d\n", (int)event,
-                  (int)info.wifi_sta_disconnected.reason);
+    gLastReason = info.wifi_sta_disconnected.reason;
+    Serial.printf("[WIFI-EVT] event=%d reason=%d (%s)\n", (int)event,
+                  (int)gLastReason, wifiReasonName(gLastReason));
   }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
   prefs.begin("mon", false);         // 先开 NVS：WiFi 账号可能已经被网页配过
-  String nvSsid = prefs.getString("ssid", WIFI_SSID);
-  String nvPass = prefs.getString("pass", WIFI_PASS);
-  Serial.printf("[BOOT] wifi ssid='%s'%s\n", nvSsid.c_str(),
+  gWifiSsid = prefs.getString("ssid", WIFI_SSID);
+  gWifiPass = prefs.getString("pass", WIFI_PASS);
+  Serial.printf("[BOOT] wifi ssid='%s'%s\n", gWifiSsid.c_str(),
                 prefs.isKey("ssid") ? " (from NVS)" : " (default)");
-  // 两段式连接：Windows 11 热点是 WPA2/WPA3 混合，优先按 WPA3(SAE) 连，
-  // 连不上再退回纯 WPA2，兼容普通路由器
-  staConnect(nvSsid, nvPass, WIFI_AUTH_WPA2_PSK);
 
-  // 等待连上，但期间照样处理串口命令：
-  // 插上 USB 打开配网页时板子会被复位，如果这里死等，
-  // 页面点「扫描」会十几秒没反应，像是坏的。
+  // 先按 WPA2 连；6 秒还没成，再按 WPA3(SAE) 试一次（纯 WPA3 路由只有第二次能连）。
+  // 等待期间照常处理串口命令：插上 USB 打开配网页时板子会被复位，
+  // 如果这里死等，页面点「扫描」会十几秒没反应，像是坏的。
+  bool triedWpa3 = (gWifiSsid.length() == 0) || (gWifiPass.length() == 0);
+  if (gWifiSsid.length() > 0) staConnect(gWifiSsid, gWifiPass, WIFI_AUTH_WPA2_PSK);
+
   uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) {
+  const uint32_t kBootWait = 12000;
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < kBootWait) {
+    // 用户在配网（gUserWifi）就不要再拿开机读到的旧账号去试 WPA3，会盖掉他刚设的配置
+    if (!triedWpa3 && !gUserWifi && millis() - t0 >= kBootWait / 2) {
+      triedWpa3 = true;
+      Serial.println("\n[WIFI] WPA2 超时，改试 WPA3(SAE)");
+      staConnect(gWifiSsid, gWifiPass, WIFI_AUTH_WPA3_PSK);
+    }
     serialPoll();
     delay(100);
     Serial.print(".");
@@ -1833,10 +2001,14 @@ void setup() {
     delay(3000);
   }
 
-  // 自动发现数据源
+  // 自动发现数据源。WiFi 没连上时别白等 8 秒 UDP 广播：等 WiFi 起来后 loop() 补一次
   tft.setTextColor(C_LABEL, C_BG);
-  tft.drawString("FINDING PC...", 20, 100, 4);
-  discoverHost();
+  if (WiFi.status() == WL_CONNECTED) {
+    tft.drawString("FINDING PC...", 20, 100, 4);
+    discoverHost();
+  } else {
+    gNeedDiscover = true;
+  }
 
   drawStatic();
   fetchMetrics(m);
@@ -1847,14 +2019,30 @@ void setup() {
 void loop() {
   serialPoll();                      // 串口配网命令（网页用）
 
-  // WiFi 掉线重连：5 秒一次，不要每个循环都戳
+  // WiFi 掉线重连：5 秒一次。两次重试交替 WPA2 / WPA3，
+  // 这样纯 WPA3 路由在断线后也能自己回来。
   //（原版这里 delay(1000) + WiFi.reconnect()，驱动会一直停在 connecting，
   //  串口刷屏 "sta is connecting, return error"，而且 SCAN 永远扫不出来）
   static uint32_t lastReconnect = 0;
+  static bool     tryWpa3 = true;    // 取反后用：第一次重试用 WPA2（最常见）
   if (!gBusy && WiFi.status() != WL_CONNECTED && millis() - lastReconnect > 5000) {
     lastReconnect = millis();
-    Serial.printf("[WiFi] retry connect, status=%d\n", (int)WiFi.status());
-    WiFi.reconnect();
+    if (gWifiSsid.length() > 0) {
+      tryWpa3 = !tryWpa3;
+      Serial.printf("[WiFi] retry connect, status=%d %s\n",
+                    (int)WiFi.status(), tryWpa3 ? "WPA3" : "WPA2");
+      staConnect(gWifiSsid, gWifiPass, tryWpa3 ? WIFI_AUTH_WPA3_PSK : WIFI_AUTH_WPA2_PSK);
+    } else if (WiFi.getMode() != WIFI_MODE_STA) {
+      WiFi.mode(WIFI_STA);           // 没账号也要保证射频在线，配网页才能扫描
+    }
+  }
+
+  // WiFi 恢复后补一次数据源发现（开机时 WiFi 没起来会跳过）
+  if (!gBusy && gNeedDiscover && WiFi.status() == WL_CONNECTED) {
+    gNeedDiscover = false;
+    Serial.println("[发现] WiFi 已恢复，重新搜索数据源");
+    discoverHost();
+    drawStatic();
   }
 
   if (!gBusy && millis() - lastFetch > REFRESH_MS) {
@@ -1868,15 +2056,19 @@ void loop() {
     } else {
       failCount++;
       gLedOnline = false;
-      // 连续 5 次失败（约 10 秒）→ 重新自动发现，应对 PC 换 IP / 换机器
+      // 连续 5 次失败（约 5 秒）→ 重新自动发现，应对 PC 换 IP / 换机器
       if (failCount >= (5000 / REFRESH_MS > 3 ? 5000 / REFRESH_MS : 3)) {
         failCount = 0;
         drawOffline();
-        Serial.println("[发现] 连续失败，重新搜索数据源");
-        discoverHost();
-        drawStatic();
-        fetchMetrics(m);
-        drawValues();
+        // WiFi 断着的时候发现是白费功夫（缓存探测必失败 + 8 秒 UDP 空等），
+        // 等 WiFi 恢复后由上面的 gNeedDiscover 补一次
+        if (WiFi.status() == WL_CONNECTED) {
+          Serial.println("[发现] 连续失败，重新搜索数据源");
+          discoverHost();
+          drawStatic();
+          fetchMetrics(m);
+          drawValues();
+        }
       } else {
         drawOffline();
       }

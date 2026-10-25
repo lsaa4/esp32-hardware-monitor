@@ -136,6 +136,17 @@ function setConnected(on){
   ['#btnStatus','#btnForget','#btnScan'].forEach(s => $(s).disabled = !on);
 }
 
+// 定时轮询状态：板子会自己重连/掉线，页面不能只在点按钮时才刷新
+let pollTimer = null, busy = false, busyAt = 0;
+function startPolling(){
+  stopPolling();
+  pollTimer = setInterval(() => {
+    if (busy && Date.now() - busyAt > 25000) busy = false;   // 命令没回包别一直卡着
+    if (writer && !busy) send('STATUS', true);
+  }, 2000);
+}
+function stopPolling(){ if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
 async function connect(){
   if (!('serial' in navigator)) {
     alert('这个浏览器不支持 Web Serial，请用 Chrome 或 Edge');
@@ -148,8 +159,10 @@ async function connect(){
     reading = true;
     readLoop();
     setConnected(true);
-    log('串口已打开');
+    busy = false;
+    log('串口已打开（板子可能会复位一下）');
     setTimeout(()=>send('STATUS'), 300);
+    startPolling();
   }catch(e){
     log('打开失败: ' + e.message);
   }
@@ -157,6 +170,7 @@ async function connect(){
 
 async function disconnect(){
   reading = false;
+  stopPolling();
   try{ if(reader) await reader.cancel(); }catch(e){}
   try{ if(writer){ writer.releaseLock(); writer = null; } }catch(e){}
   try{ if(port){ await port.close(); port = null; } }catch(e){}
@@ -164,11 +178,11 @@ async function disconnect(){
   log('串口已断开');
 }
 
-async function send(cmd){
+async function send(cmd, quiet){
   if(!writer) return;
   const data = new TextEncoder().encode(cmd + '\n');
   await writer.write(data);
-  log('→ ' + cmd.replace('\t','<TAB>'));
+  if(!quiet) log('→ ' + cmd.replace('\t','<TAB>'));
 }
 
 async function readLoop(){
@@ -209,21 +223,38 @@ function handleLine(line){
 
   if(tag === '#STATUS'){
     $('#st').textContent = obj.connected ? '已连接' : '未连接';
-    $('#ssid').textContent = obj.ssid || '—';
-    $('#ip').textContent = obj.ip || '—';
+    $('#ssid').textContent = obj.connected ? (obj.ssid || '—') : '—';
+    $('#ip').textContent = obj.connected ? obj.ip : '—';
     $('#rssi').textContent = obj.connected ? obj.rssi + ' dBm' : '—';
   }
   else if(tag === '#SCAN'){
+    busy = false;
     renderNets(obj.nets || []);
   }
   else if(tag === '#OK'){
+    busy = false;
     log('成功 ' + (obj.ip ? 'IP=' + obj.ip : (obj.msg||'')));
     $('#joinTip').textContent = obj.ip ? '已连接 ' + obj.ip : '';
-    setTimeout(()=>send('STATUS'), 500);
+    if(obj.msg === 'forgotten'){
+      // 板子已经断开，面板立刻清空，别等下一次轮询
+      $('#st').textContent = '未连接';
+      $('#ssid').textContent = '—';
+      $('#ip').textContent = '—';
+      $('#rssi').textContent = '—';
+      $('#joinTip').textContent = '已清除板子里的 WiFi';
+    }
+    setTimeout(()=>send('STATUS', true), 500);
   }
   else if(tag === '#ERR'){
-    log('失败 ' + (obj.msg||''));
-    $('#joinTip').textContent = obj.msg || '失败';
+    busy = false;
+    const msg = obj.msg || '失败';
+    log('失败 ' + msg);
+    $('#joinTip').textContent = msg;
+    // 扫描失败时把列表里的“扫描中…”换掉，否则会一直卡在那儿
+    if(msg.indexOf('scan') === 0){
+      $('#list').innerHTML = '<div class="muted" style="padding:10px">扫描失败，请再点一次「扫描」</div>';
+    }
+    setTimeout(()=>send('STATUS', true), 800);
   }
 }
 
@@ -269,12 +300,21 @@ function escapeHtml(s){
 $('#btnConn').onclick = connect;
 $('#btnDisc').onclick = disconnect;
 $('#btnStatus').onclick = () => send('STATUS');
-$('#btnScan').onclick = () => { $('#list').innerHTML = '<div class="muted" style="padding:10px">扫描中…（约 3 秒）</div>'; send('SCAN'); };
-$('#btnForget').onclick = () => { if(confirm('清除板子里保存的 WiFi？')) send('FORGET'); };
+$('#btnScan').onclick = () => {
+  busy = true; busyAt = Date.now();
+  $('#list').innerHTML = '<div class="muted" style="padding:10px">扫描中…（约 3-8 秒）</div>';
+  send('SCAN');
+};
+$('#btnForget').onclick = () => {
+  if(!confirm('清除板子里保存的 WiFi？')) return;
+  busy = true; busyAt = Date.now();
+  send('FORGET');
+};
 $('#btnJoin').onclick = () => {
   if(!selSsid) return;
+  busy = true; busyAt = Date.now();
   send('WIFI ' + selSsid + '\t' + $('#pass').value);
-  $('#joinTip').textContent = '正在连接…';
+  $('#joinTip').textContent = '正在连接…（最多约 17 秒）';
 };
 $('#pass').addEventListener('keydown', e => { if(e.key === 'Enter') $('#btnJoin').click(); });
 </script>
