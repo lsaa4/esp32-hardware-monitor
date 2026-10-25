@@ -1044,6 +1044,21 @@ void drawOffline() {
 #define PAGE_MS 10000
 #define NPAGE   5
 
+// 翻页擦除动画：每步前进 WIPE_STEP 像素、停顿 WIPE_DELAY_MS 毫秒
+// 320 / 8 × (6+0.6) ≈ 265ms；想更慢就调大 DELAY，想更细就调小 STEP
+#define WIPE_STEP     8
+#define WIPE_DELAY_MS 6
+
+// 页头/标签用的 12x12 小图标（纯几何图形，不占字模）
+#define ICON_MONITOR 0
+#define ICON_CPU     1
+#define ICON_GPU     2
+#define ICON_RAM     3
+#define ICON_DISK    4
+#define ICON_NET     5
+#define ICON_BATT    6
+#define ICON_POWER   7
+
 static int      gPage     = 0;
 static uint32_t gPageAt   = 0;
 static bool     gNeedFull = true;
@@ -1127,11 +1142,67 @@ static void pVBarSet(int id, int x, int yTop, int w, int h, float pct, uint16_t 
   gBarPct[id] = pct;
 }
 
-static void pHeader(const char* title) {
+// 12x12 小图标：用矩形 / 圆 / 线段拼出来，不依赖字模
+static void drawIcon(uint8_t k, int x, int y, uint16_t c) {
+  switch (k) {
+    case ICON_MONITOR:                       // 显示器
+      tft.drawRect(x + 1, y + 1, 10, 7, c);
+      tft.fillRect(x + 5, y + 9, 2, 2, c);
+      tft.fillRect(x + 3, y + 11, 6, 1, c);
+      break;
+    case ICON_CPU:                           // 芯片：外框 + 芯 + 四边引脚
+      tft.drawRect(x + 2, y + 2, 8, 8, c);
+      tft.fillRect(x + 5, y + 5, 2, 2, c);
+      for (int i = 0; i < 3; i++) {
+        int px = x + 3 + i * 3;
+        tft.fillRect(px, y, 1, 2, c);
+        tft.fillRect(px, y + 10, 1, 2, c);
+        int py = y + 3 + i * 3;
+        tft.fillRect(x, py, 2, 1, c);
+        tft.fillRect(x + 10, py, 2, 1, c);
+      }
+      break;
+    case ICON_GPU:                           // 显卡：卡身 + 风扇
+      tft.drawRect(x + 1, y + 3, 10, 6, c);
+      tft.drawCircle(x + 8, y + 6, 2, c);
+      tft.fillRect(x + 3, y + 5, 3, 1, c);
+      tft.fillRect(x + 3, y + 8, 3, 1, c);
+      break;
+    case ICON_RAM:                           // 内存条：长条 + 颗粒分割 + 金手指
+      tft.drawRect(x + 1, y + 3, 10, 5, c);
+      for (int i = 0; i < 3; i++) tft.fillRect(x + 3 + i * 3, y + 4, 1, 3, C_PAPER);
+      tft.fillRect(x + 2, y + 9, 8, 1, c);
+      break;
+    case ICON_DISK:                          // 硬盘：盘体 + 主轴
+      tft.drawRect(x + 2, y + 1, 8, 10, c);
+      tft.drawCircle(x + 5, y + 5, 2, c);
+      tft.fillRect(x + 8, y + 9, 1, 1, c);
+      break;
+    case ICON_NET:                           // 网络：三根信号柱
+      tft.fillRect(x + 1, y + 7, 2, 4, c);
+      tft.fillRect(x + 5, y + 4, 2, 7, c);
+      tft.fillRect(x + 9, y + 1, 2, 10, c);
+      break;
+    case ICON_BATT:                          // 电池
+      tft.drawRect(x + 1, y + 3, 9, 6, c);
+      tft.fillRect(x + 10, y + 5, 2, 2, c);
+      tft.fillRect(x + 2, y + 4, 5, 4, c);
+      break;
+    case ICON_POWER:                         // 闪电
+      tft.drawLine(x + 7, y + 1, x + 3, y + 6, c);
+      tft.drawLine(x + 3, y + 6, x + 6, y + 6, c);
+      tft.drawLine(x + 6, y + 6, x + 4, y + 11, c);
+      tft.drawLine(x + 4, y + 11, x + 9, y + 5, c);
+      tft.drawLine(x + 9, y + 5, x + 6, y + 5, c);
+      break;
+  }
+}
+
+static void pHeader(uint8_t icon, const char* title) {
   tft.fillRect(0, 0, 320, 22, C_PAPER);
-  tft.fillCircle(9, 11, 3, C_INK);
+  drawIcon(icon, 6, 5, C_INK);
   tft.setTextColor(C_INK, C_PAPER);
-  tft.drawString(title, 18, 3, 2);
+  tft.drawString(title, 24, 3, 2);
   for (int i = 0; i < NPAGE; i++) {
     int x = 266 + i * 11;
     if (i == gPage) tft.fillCircle(x, 11, 3, C_ACC);
@@ -1169,16 +1240,20 @@ static void pBigTemp(int slot, int x, int y, float t) {
 }
 
 static void p1Frame() {
-  pHeader("PC MONITOR");
-  pLabel(10, 28, "01 CPU TEMP");
-  pLabel(170, 28, "02 GPU TEMP");
+  pHeader(ICON_MONITOR, "PC MONITOR");
+  drawIcon(ICON_CPU, 10, 24, C_GRAY2);
+  pLabel(26, 28, "CPU TEMP");
+  drawIcon(ICON_GPU, 170, 24, C_GRAY2);
+  pLabel(186, 28, "GPU TEMP");
   tft.drawFastVLine(160, 26, 84, C_EDGE);
   pLabel(10, 86, "LOAD");
   pLabel(170, 86, "LOAD");
   tft.drawFastHLine(0, 116, 320, C_EDGE);
-  pLabel(10, 122, "03 MEMORY");
+  drawIcon(ICON_RAM, 10, 119, C_GRAY2);
+  pLabel(26, 122, "MEMORY");
   tft.drawFastHLine(0, 188, 320, C_EDGE);
-  pLabel(10, 194, "04 POWER");
+  drawIcon(ICON_POWER, 10, 191, C_GRAY2);
+  pLabel(26, 194, "POWER");
   pFooter("AUTO 10s");
   pResetAll();
 }
@@ -1219,7 +1294,7 @@ static void p1Values() {
 }
 
 static void p2Frame() {
-  pHeader("CPU  DETAIL");
+  pHeader(ICON_CPU, "CPU  DETAIL");
   int nt = (m.nCoreLoad > 0) ? m.nCoreLoad : 16;
   int nc = (m.nCoreMhz  > 0) ? m.nCoreMhz  : 8;
   if (nt > MAX_CORE) nt = MAX_CORE;
@@ -1291,7 +1366,7 @@ static void p2Values() {
 }
 
 static void p3Frame() {
-  pHeader("GPU  DETAIL");
+  pHeader(ICON_GPU, "GPU  DETAIL");
   pLabel(10, 26, "CORE TEMP");
   tft.drawFastVLine(160, 24, 62, C_EDGE);
   pLabel(170, 26, "HOT SPOT");
@@ -1339,7 +1414,7 @@ static void p3Values() {
 }
 
 static void p4Frame() {
-  pHeader("STORAGE / RAM");
+  pHeader(ICON_DISK, "STORAGE / RAM");
   pLabel(10, 26, "DISK 1");
   pLabel(10, 86, "DISK 2");
   tft.drawFastHLine(0, 146, 320, C_EDGE);
@@ -1392,12 +1467,15 @@ static void p4Values() {
 }
 
 static void p5Frame() {
-  pHeader("NET / POWER");
-  pLabel(10, 26, "DOWNLOAD");
+  pHeader(ICON_NET, "NET / POWER");
+  drawIcon(ICON_NET, 10, 23, C_GRAY2);
+  pLabel(26, 26, "DOWNLOAD");
   tft.drawFastHLine(0, 80, 320, C_EDGE);
-  pLabel(10, 86, "UPLOAD");
+  drawIcon(ICON_NET, 10, 83, C_GRAY2);
+  pLabel(26, 86, "UPLOAD");
   tft.drawFastHLine(0, 140, 320, C_EDGE);
-  pLabel(10, 146, "BATTERY");
+  drawIcon(ICON_BATT, 10, 143, C_GRAY2);
+  pLabel(26, 146, "BATTERY");
   pFooter("LIVE");
   pResetAll();
 }
@@ -1459,6 +1537,17 @@ void drawStatic() {
   pFrame(gPage);
 }
 
+// 翻页过渡：粉色扫描线从左往右，把旧页擦成纸白
+static void pageWipe() {
+  for (int x = 0; x < 320; x += WIPE_STEP) {
+    int xx = (x >= 2) ? x - 2 : 0;
+    tft.fillRect(xx, 0, WIPE_STEP + 2, 240, C_PAPER);   // 顺带擦掉上一帧的扫描线
+    tft.fillRect(x + WIPE_STEP - 2, 0, 2, 240, C_ACC);  // 粉色扫描线
+    delay(WIPE_DELAY_MS);
+  }
+  tft.fillRect(320 - WIPE_STEP, 0, WIPE_STEP, 240, C_PAPER);
+}
+
 void drawValues() {
   if (gNeedFull) {
     gNeedFull = false;
@@ -1467,9 +1556,9 @@ void drawValues() {
   }
   if (millis() - gPageAt > PAGE_MS) {
     gPage = (gPage + 1) % NPAGE;
+    pageWipe();
     gPageAt = millis();
     gLedFlash = millis() + LED_FLASH;
-    tft.fillScreen(C_PAPER);
     pFrame(gPage);
   }
   pValues(gPage);
@@ -1478,7 +1567,7 @@ void drawValues() {
 void drawOffline() {
   gNeedFull = true;
   tft.fillScreen(C_PAPER);
-  pHeader("PC OFFLINE");
+  pHeader(ICON_MONITOR, "PC OFFLINE");
   tft.setTextColor(C_GRAY2, C_PAPER);
   tft.drawString("NO SIGNAL", 10, 96, 4);
   tft.setTextColor(C_GRAY, C_PAPER);
