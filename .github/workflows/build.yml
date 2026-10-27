@@ -32,6 +32,7 @@ jobs:
         run: |
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" \
+            --libraries libraries \
             --export-binaries \
             firmware/esp32_monitor_hal
 

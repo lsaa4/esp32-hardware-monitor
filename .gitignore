@@ -9,6 +9,10 @@ build/
 *.map
 *.hex
 
+# 现成固件要随仓库分发，单独放行（Arduino 的 build/ 目录仍忽略）
+!firmware/build/
+!firmware/build/*.bin
+
 # 编辑器 / 系统
 .vscode/
 .idea/

@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZENLESS ZONE ZERO // ESP32 控制台</title>
+<link rel="stylesheet" href="zzz_theme.css">
+</head>
+<body>
+<div class="ik-bg" aria-hidden="true"><div class="ik-bg-band"><div class="ik-bg-row"><div class="ik-bg-track "><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track rtl"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track offset"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track rtl"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track "><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track rtl slow"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div></div></div>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <img class="brand-avatar" src="wanzhou_avatar.png" alt="Wanzhou">
+      <div>
+        <div class="brand-name">ZENLESS ZONE <em>ZERO</em></div>
+        <div class="brand-sub">ESP32-S3 · USB SERIAL</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <span class="status"><span class="dot" id="dot"></span><span id="connTxt">未连接</span></span>
+    <button class="primary" id="btnConn">连接串口</button>
+    <button id="btnDisc" disabled>断开</button>
+  </header>
+
+  <div class="tabs">
+    <div class="tab on" data-tab="img">01 开机图片</div>
+    <div class="tab" data-tab="pages">02 显示内容</div>
+    <div class="tab" data-tab="dev">03 设备</div>
+  </div>
+
+  <!-- ================= 开机图片 ================= -->
+  <section id="tab-img">
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <b>选择一张图片</b>
+        <span class="spacer" style="flex:1"></span>
+        <span class="muted" id="fileName">还没有选图</span>
+      </div>
+      <div class="drop" id="drop">
+        点击选择，或把 <b>PNG / JPG / WebP / GIF</b> 拖到这里<br>
+        <span class="muted">GIF 会缩放到 320×240（最大 640×480，按铺满裁切）；其他图片会裁成 320×240（RGB565）</span>
+      </div>
+      <input type="file" id="file" accept="image/*" class="hide">
+      <div class="row" style="margin-top:12px">
+        <span class="muted">缩放</span>
+        <select id="fit">
+          <option value="cover">铺满（裁切）</option>
+          <option value="contain">完整（留边）</option>
+        </select>
+        <span class="muted">留边颜色</span>
+        <input type="color" id="bg" value="#000000">
+        <span class="spacer" style="flex:1"></span>
+        <span class="muted" id="imgMeta">—</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="previews">
+        <div>
+          <div class="muted" style="margin-bottom:6px">原图（按缩放裁切）</div>
+          <canvas id="orig" width="320" height="240"></canvas>
+        </div>
+        <div>
+          <div class="muted" style="margin-bottom:6px">设备实际效果（RGB565）</div>
+          <canvas id="prev" width="320" height="240"></canvas>
+        </div>
+      </div>
+      <div class="progress"><i id="bar"></i></div>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="uploadBtn" disabled>上传到设备</button>
+        <button id="delImgBtn" disabled>删除设备里的开机图片</button>
+        <span class="spacer" style="flex:1"></span>
+        <span class="muted" id="imgStateTxt">—</span>
+      </div>
+      <div class="foot">上传过程中不要拔 USB。完成后设备会自动重启，开机时会显示这张图。</div>
+    </div>
+  </section>
+
+  <!-- ================= 显示内容 ================= -->
+  <section id="tab-pages" class="hide">
+    <div class="card">
+      <div class="row" style="margin-bottom:6px">
+        <b>轮播哪几页</b>
+        <span class="spacer" style="flex:1"></span>
+        <button id="btnReloadPages">从设备读取</button>
+      </div>
+      <div class="muted" style="margin-bottom:12px">保存后立即生效，不需要重启。至少保留一页。</div>
+      <div class="pages">
+        <label class="pg"><input type="checkbox" class="pgbox" value="1" checked>
+          <span><span class="name">ALL · 总览</span><br><span class="desc">CPU / GPU 温度、内存、网络</span></span></label>
+        <label class="pg"><input type="checkbox" class="pgbox" value="2" checked>
+          <span><span class="name">CPU</span><br><span class="desc">温度、负载、平均频率、封装功耗</span></span></label>
+        <label class="pg"><input type="checkbox" class="pgbox" value="4" checked>
+          <span><span class="name">GPU</span><br><span class="desc">温度、负载、显存、功耗</span></span></label>
+        <label class="pg"><input type="checkbox" class="pgbox" value="8" checked>
+          <span><span class="name">MEM · 存储</span><br><span class="desc">内存、硬盘温度 / 占用、DIMM</span></span></label>
+        <label class="pg"><input type="checkbox" class="pgbox" value="16" checked>
+          <span><span class="name">NET · 网络</span><br><span class="desc">上下行、电池、RTT</span></span></label>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" id="btnSavePages" disabled>保存到设备</button>
+        <button id="btnAllPages">全选</button>
+        <span class="muted" id="pageState">—</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 设备 ================= -->
+  <section id="tab-dev" class="hide">
+    <div class="card">
+      <div class="kv">
+        <b>固件</b><span id="fw">—</span>
+        <b>ffat 空闲</b><span id="free">—</span>
+        <b>开机图片</b><span id="imgState">—</span>
+        <b>当前掩码</b><span id="maskState" class="mono">—</span>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="btnInfo" disabled>刷新状态</button>
+        <button id="btnReboot" disabled>重启设备</button>
+        <button id="btnResetPages" disabled>恢复默认显示</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="muted" style="margin-bottom:6px">串口日志</div>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+
+  <div class="foot">
+    Chrome / Edge 89+。如果双击打开提示不支持 Web Serial：在本目录执行
+    <code>python -m http.server 8000</code>，再打开 <code>http://localhost:8000/webui.html</code>。
+    WiFi 配网仍用 <code>wifi_manager.html</code>（两个页面不能同时占用串口）。
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const enc = new TextEncoder();
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const FRAME_W = 320, FRAME_H = 240, FRAME_BYTES = FRAME_W * FRAME_H * 2;
+
+/* 浏览器本地保存：只是 UI 偏好/草稿，真正的配置在板子 NVS */
+const LS_FIT = 'ik_webui_fit';
+const LS_BG = 'ik_webui_bg';
+const LS_TAB = 'ik_webui_tab';
+const LS_PMASK = 'ik_webui_pmask';
+const LS_PORT = 'ik_webui_port';
+const LS_AUTO = 'ik_webui_autoconnect';
+function storeGet(k, d) {
+  try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; }
+}
+function storeSet(k, v) {
+  try { localStorage.setItem(k, String(v)); } catch (e) {}
+}
+
+/* IndexedDB 只缓存最后一张图的预览；真正的图在板子 ffat 里 */
+const IDB_NAME = 'zzz_webui_image';
+const IDB_STORE = 'kv';
+let idbPromise = null;
+function idbOpen() {
+  if (!('indexedDB' in window)) return Promise.resolve(null);
+  if (idbPromise) return idbPromise;
+  idbPromise = new Promise(resolve => {
+    let req;
+    try { req = indexedDB.open(IDB_NAME, 1); } catch (e) { resolve(null); return; }
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+    req.onblocked = () => resolve(null);
+  });
+  return idbPromise;
+}
+async function cachePut(rec) {
+  const db = await idbOpen();
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(rec, 'last');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    } catch (e) { reject(e); }
+  });
+}
+async function cacheGet() {
+  const db = await idbOpen();
+  if (!db) return null;
+  return new Promise(resolve => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const q = tx.objectStore(IDB_STORE).get('last');
+      q.onsuccess = () => resolve(q.result || null);
+      q.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+}
+async function cacheClear() {
+  const db = await idbOpen();
+  if (!db) return;
+  return new Promise(resolve => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete('last');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch (e) { resolve(); }
+  });
+}
+
+let port = null, writer = null, reader = null, reading = false, rxbuf = '';
+let waiters = [];
+let connected = false;
+let currentImage = null;     // { bytes, crc, gif?, fromCache? }
+let currentFile = null;
+let srcBitmap = null;
+let gifBytes = null;
+let deviceImgOk = false;
+let uploading = false;
+let pageSaveTimer = null;
+let connecting = false;
+
+/* ---------------- UI helpers ---------------- */
+function log(s) {
+  const el = $('#log');
+  el.textContent += (new Date().toLocaleTimeString()) + '  ' + s + '\n';
+  const lines = el.textContent.split('\n');
+  if (lines.length > 160) el.textContent = lines.slice(-120).join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+let toastTimer = null;
+function toast(s, bad) {
+  const el = $('#toast');
+  el.textContent = s;
+  el.classList.toggle('bad', !!bad);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+function setProgress(p) { $('#bar').style.width = Math.max(0, Math.min(100, p)) + '%'; }
+function fmtBytes(n) {
+  if (!n) return '0 KB';
+  if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
+  return Math.round(n / 1024) + ' KB';
+}
+
+/* ---------------- 串口 ---------------- */
+function setConnected(on) {
+  connected = on;
+  $('#dot').classList.toggle('on', on);
+  $('#connTxt').textContent = on ? '已连接' : '未连接';
+  $('#btnConn').disabled = on;
+  $('#btnDisc').disabled = !on;
+  ['#btnInfo', '#btnReboot', '#btnResetPages', '#btnSavePages', '#btnReloadPages'].forEach(s => $(s).disabled = !on);
+  $('#uploadBtn').disabled = !on || !currentImage;
+  $('#delImgBtn').disabled = !on;
+}
+
+function clearWaiters(err) {
+  const ws = waiters;
+  waiters = [];
+  for (const w of ws) { clearTimeout(w.timer); w.reject(err); }
+}
+
+async function openPort(p, label) {
+  port = p;
+  await port.open({ baudRate: 115200, bufferSize: 4096 });
+  writer = port.writable.getWriter();
+  reading = true;
+  readLoop();
+  try {
+    const info = port.getInfo ? port.getInfo() : {};
+    storeSet(LS_PORT, JSON.stringify(info));
+  } catch (e) {}
+  storeSet(LS_AUTO, '1');
+  setConnected(true);
+  log(label);
+  await sleep(1400);
+  const ok = await probeDevice();
+  if (!ok) toast('板子没有响应，检查 USB 线和串口占用', true);
+  return ok;
+}
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    alert('这个浏览器不支持 Web Serial，请用 Chrome 或 Edge。');
+    return;
+  }
+  if (connecting || connected) return;
+  connecting = true;
+  storeSet(LS_AUTO, '1');
+  try {
+    const granted = await navigator.serial.getPorts().catch(() => []);
+    let saved = {};
+    try { saved = JSON.parse(storeGet(LS_PORT, '{}')) || {}; } catch (e) {}
+    const p = granted.find(x => portInfoMatches(x, saved)) || granted[0] ||
+              await navigator.serial.requestPort();
+    await openPort(p, '串口已打开，等待板子启动…');
+  } catch (e) {
+    log('打开失败: ' + e.message);
+    toast('打开串口失败：' + e.message, true);
+    await closePort();
+  } finally {
+    connecting = false;
+  }
+}
+
+function portInfoMatches(p, saved) {
+  try {
+    const info = p.getInfo ? p.getInfo() : {};
+    return ['usbVendorId', 'usbProductId', 'serialNumber'].every(
+      k => (saved[k] ?? null) === (info[k] ?? null)
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
+// 刷新后浏览器会关掉串口，但授权还在。用 getPorts() 自动恢复，不需要再点连接。
+async function autoConnect() {
+  if (!('serial' in navigator) || connected || connecting) return;
+  if (storeGet(LS_AUTO, '1') === '0') {
+    log('上次是手动断开，刷新后不再自动连接');
+    return;
+  }
+  try {
+    const ports = await navigator.serial.getPorts();
+    if (!ports.length) {
+      log('没有已授权的串口，请点「连接串口」');
+      return;
+    }
+    let saved = {};
+    try { saved = JSON.parse(storeGet(LS_PORT, '{}')) || {}; } catch (e) {}
+    const p = ports.find(x => portInfoMatches(x, saved)) || ports[0];
+    connecting = true;
+    log('检测到已授权的串口，自动恢复连接…');
+    for (let i = 0; i < 3; i++) {
+      try {
+        await openPort(p, '串口已自动恢复');
+        return;
+      } catch (e) {
+        log('自动恢复失败(' + (i + 1) + '/3)：' + e.message);
+        await closePort();
+        if (i < 2) await sleep(450);
+      }
+    }
+    log('自动恢复失败，请点「连接串口」重试');
+  } catch (e) {
+    log('自动恢复失败：' + e.message);
+  } finally {
+    connecting = false;
+  }
+}
+
+async function closePort() {
+  reading = false;
+  clearWaiters(new Error('串口已断开'));
+  try { if (reader) await reader.cancel(); } catch (e) {}
+  try { if (writer) { writer.releaseLock(); writer = null; } } catch (e) {}
+  try { if (port) { await port.close(); port = null; } } catch (e) {}
+  setConnected(false);
+}
+
+async function disconnect() {
+  await closePort();
+  log('串口已断开');
+}
+
+async function userDisconnect() {
+  storeSet(LS_AUTO, '0');
+  await disconnect();
+  log('已手动断开；刷新后不会自动连接');
+}
+
+async function readLoop() {
+  const dec = new TextDecoder();
+  while (port && port.readable && reading) {
+    reader = port.readable.getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        rxbuf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = rxbuf.indexOf('\n')) >= 0) {
+          const line = rxbuf.slice(0, i).replace(/\r$/, '');
+          rxbuf = rxbuf.slice(i + 1);
+          handleLine(line);
+        }
+      }
+    } catch (e) {
+      if (reading) log('读取中断: ' + e.message);
+    } finally {
+      try { reader.releaseLock(); } catch (e) {}
+    }
+  }
+  if (reading) {
+    reading = false;
+    clearWaiters(new Error('串口已断开'));
+    setConnected(false);
+    log('串口连接已断开');
+  }
+}
+
+function handleLine(line) {
+  if (!line) return;
+  if (line[0] !== '#') { log(line); return; }
+
+  const sp = line.indexOf(' ');
+  const tag = sp < 0 ? line : line.slice(0, sp);
+  const body = sp < 0 ? '' : line.slice(sp + 1);
+  let obj = {};
+  if (body.startsWith('{')) {
+    try { obj = JSON.parse(body); } catch (e) { log('JSON 解析失败: ' + line); }
+  }
+
+  if (tag === '#ERR') {
+    const w = waiters.shift();
+    if (w) { clearTimeout(w.timer); w.reject(new Error(obj.msg || '设备返回错误')); }
+    else toast(obj.msg || '设备返回错误', true);
+    return;
+  }
+
+  const idx = waiters.findIndex(w => w.tag === tag);
+  if (idx >= 0) {
+    const w = waiters.splice(idx, 1)[0];
+    clearTimeout(w.timer);
+    w.resolve(obj);
+  } else {
+    log(line);
+  }
+}
+
+function waitTag(tag, timeout) {
+  return new Promise((resolve, reject) => {
+    const w = { tag, resolve, reject, timer: null };
+    w.timer = setTimeout(() => {
+      const i = waiters.indexOf(w);
+      if (i >= 0) waiters.splice(i, 1);
+      reject(new Error('等待 ' + tag + ' 超时'));
+    }, timeout || 5000);
+    waiters.push(w);
+  });
+}
+
+async function writeText(s) {
+  if (!writer) throw new Error('串口未连接');
+  await writer.write(enc.encode(s + '\n'));
+}
+
+async function writeBytes(u8) {
+  if (!writer) throw new Error('串口未连接');
+  await writer.write(u8);
+}
+
+function sendCmd(cmd, tag, timeout) {
+  return new Promise((resolve, reject) => {
+    const w = { tag, resolve, reject, timer: null };
+    w.timer = setTimeout(() => {
+      const i = waiters.indexOf(w);
+      if (i >= 0) waiters.splice(i, 1);
+      reject(new Error('等待 ' + tag + ' 超时'));
+    }, timeout || 5000);
+    waiters.push(w);
+    writeText(cmd).catch(err => {
+      clearTimeout(w.timer);
+      const i = waiters.indexOf(w);
+      if (i >= 0) waiters.splice(i, 1);
+      reject(err);
+    });
+  });
+}
+
+/* ---------------- 设备状态 ---------------- */
+async function probeDevice() {
+  for (let i = 0; i < 15; i++) {
+    try {
+      const info = await sendCmd('INFO', '#INFO', 900);
+      applyInfo(info);
+      const localMask = Number(storeGet(LS_PMASK, 0)) || 0;
+      try {
+        const devMask = await refreshCfg();
+        if (localMask && localMask !== devMask) {
+          $$('.pgbox').forEach(b => { b.checked = !!(localMask & Number(b.value)); });
+          $('#pageState').textContent = '本地草稿：0x' + localMask.toString(16).toUpperCase();
+          queuePageSave();
+          log('本地页草稿与设备不同，自动保存到设备');
+        }
+      } catch (e) { log('CFG? ' + e.message); }
+      try { await refreshImg(); } catch (e) { log('IMG? ' + e.message); }
+      log('设备就绪：' + (info.fw || '?'));
+      return true;
+    } catch (e) {
+      await sleep(300);
+    }
+  }
+  return false;
+}
+
+function applyInfo(i) {
+  $('#fw').textContent = i.fw || '—';
+  $('#free').textContent = fmtBytes(i.free || 0);
+  $('#imgState').textContent = i.img ? '已设置' : '未设置';
+  $('#maskState').textContent = '0x' + Number(i.mask || 0).toString(16).toUpperCase();
+}
+
+async function refreshInfo() {
+  const i = await sendCmd('INFO', '#INFO', 3000);
+  applyInfo(i);
+}
+
+async function refreshCfg() {
+  const r = await sendCmd('CFG?', '#CFG', 3000);
+  const mask = Number(r.mask) || 0;
+  $$('.pgbox').forEach(b => { b.checked = !!(mask & Number(b.value)); });
+  if (mask) storeSet(LS_PMASK, mask);
+  $('#pageState').textContent = '当前：0x' + mask.toString(16).toUpperCase();
+  return mask;
+}
+
+async function refreshImg() {
+  const r = await sendCmd('IMG?', '#IMG', 3000);
+  deviceImgOk = !!r.ok;
+  $('#imgStateTxt').textContent = r.ok
+    ? '设备里已有图片（' + fmtBytes(r.bytes || FRAME_BYTES) + '）'
+    : '设备里还没有开机图片';
+  $('#delImgBtn').disabled = !connected;
+  $('#imgState').textContent = r.ok ? '已设置' : '未设置';
+
+  try {
+    const rec = await cacheGet();
+    if (rec) {
+      const mismatch = !r.ok || rec.size !== Number(r.bytes) || !!rec.gif !== !!r.gif ||
+                       (!r.gif && (rec.crc >>> 0) !== (Number(r.crc) >>> 0));
+      if (mismatch) {
+        await cacheClear();
+        if (currentImage && currentImage.fromCache) {
+          clearImagePreview();
+          log('设备里的图片与本地缓存不一致，已清除过期预览');
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+/* ---------------- 图片转换 ---------------- */
+async function pickFile(file) {
+  if (!file) return;
+  if (file.type && !file.type.startsWith('image/')) { toast('请选择图片文件', true); return; }
+  const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
+  if (file.size > 20 * 1024 * 1024) { toast('图片太大（超过 20 MB）', true); return; }
+  if (isGif && file.size > 6 * 1024 * 1024) { toast('GIF 太大（上限 6 MB）', true); return; }
+
+  currentFile = file;
+  currentImage = null;
+  gifBytes = null;
+  srcBitmap = null;
+  $('#uploadBtn').disabled = true;
+
+  try {
+    srcBitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch (e) {
+    try { srcBitmap = await createImageBitmap(file); } catch (e2) {
+      try {
+        srcBitmap = await new Promise((resolve, reject) => {
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+          img.src = url;
+        });
+      } catch (e3) {
+        currentFile = null;
+        toast('无法读取这张图片', true); return;
+      }
+    }
+  }
+
+  if (isGif) {
+    const gw = srcBitmap.width, gh = srcBitmap.height;
+    if (gw > 640 || gh > 480) {
+      gifBytes = null; srcBitmap = null; currentFile = null;
+      toast('GIF 最大 640×480（当前 ' + gw + '×' + gh + '）', true);
+      return;
+    }
+    gifBytes = new Uint8Array(await file.arrayBuffer());
+    log('GIF ' + gw + '×' + gh + '：原样上传，开机缩放到 320×240 播放');
+  } else {
+    gifBytes = null;
+  }
+
+  $('#fileName').textContent = file.name;
+  render();
+}
+
+function drawTo(canvas, bmp, fit, bgColor, quantize) {
+  canvas.width = FRAME_W;
+  canvas.height = FRAME_H;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, FRAME_W, FRAME_H);
+
+  const scale = fit === 'cover'
+    ? Math.max(FRAME_W / bmp.width, FRAME_H / bmp.height)
+    : Math.min(FRAME_W / bmp.width, FRAME_H / bmp.height);
+  const dw = Math.round(bmp.width * scale);
+  const dh = Math.round(bmp.height * scale);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(bmp, Math.round((FRAME_W - dw) / 2), Math.round((FRAME_H - dh) / 2), dw, dh);
+
+  if (!quantize) return null;
+
+  const src = ctx.getImageData(0, 0, FRAME_W, FRAME_H);
+  const out = ctx.createImageData(FRAME_W, FRAME_H);
+  const bytes = new Uint8Array(FRAME_BYTES);
+
+  for (let i = 0, p = 0; i < FRAME_W * FRAME_H; i++, p += 4) {
+    const r = src.data[p], g = src.data[p + 1], b = src.data[p + 2];
+    const v = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    bytes[i * 2]     = v & 0xFF;
+    bytes[i * 2 + 1] = (v >> 8) & 0xFF;
+    out.data[p]     = (v >> 11) << 3;
+    out.data[p + 1] = ((v >> 5) & 0x3F) << 2;
+    out.data[p + 2] = (v & 0x1F) << 3;
+    out.data[p + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+  return { bytes, crc: crc32(bytes) };
+}
+
+function render() {
+  if (!srcBitmap) return;
+  const fit = $('#fit').value;
+  const bg = $('#bg').value;
+  drawTo($('#orig'), srcBitmap, fit, bg, false);
+  const res = drawTo($('#prev'), srcBitmap, fit, bg, true);
+  if (!res) return;
+
+  if (gifBytes) {
+    currentImage = { bytes: gifBytes, crc: crc32(gifBytes), gif: true };
+    $('#imgMeta').textContent = FRAME_W + '×' + FRAME_H + ' · ' + fmtBytes(gifBytes.length) + ' · GIF 动图';
+  } else {
+    currentImage = res;
+    $('#imgMeta').textContent = FRAME_W + '×' + FRAME_H + ' · ' + fmtBytes(res.bytes.length) +
+                                ' · 约 ' + Math.ceil(res.bytes.length / 11520) + ' 秒';
+  }
+  currentImage.fromCache = false;
+  $('#uploadBtn').disabled = !connected;
+}
+
+async function cacheUploadedImage() {
+  if (!currentImage) return;
+  try {
+    const bytes = currentImage.bytes;
+    const blob = currentFile || new Blob([bytes], { type: currentImage.gif ? 'image/gif' : 'application/octet-stream' });
+    await cachePut({
+      blob,
+      bytes: bytes.slice().buffer,
+      crc: currentImage.crc >>> 0,
+      gif: !!currentImage.gif,
+      name: currentFile ? currentFile.name : 'boot.img',
+      size: bytes.length
+    });
+  } catch (e) {
+    log('缓存预览失败：' + e.message);
+  }
+}
+
+function clearImagePreview() {
+  currentImage = null;
+  currentFile = null;
+  srcBitmap = null;
+  gifBytes = null;
+  $('#fileName').textContent = '还没有选图';
+  $('#imgMeta').textContent = '—';
+  ['#orig', '#prev'].forEach(s => {
+    const cv = $(s);
+    if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+  });
+  $('#uploadBtn').disabled = true;
+}
+
+async function restoreCachedImage() {
+  try {
+    const rec = await cacheGet();
+    if (!rec || !rec.bytes || !rec.blob) return;
+    let bmp;
+    try {
+      bmp = await createImageBitmap(rec.blob, { imageOrientation: 'from-image' });
+    } catch (e) {
+      bmp = await createImageBitmap(rec.blob);
+    }
+    srcBitmap = bmp;
+    currentFile = (rec.blob instanceof File) ? rec.blob :
+      new File([rec.blob], rec.name || 'boot.img', { type: rec.blob.type || 'application/octet-stream' });
+    const bytes = new Uint8Array(rec.bytes);
+    gifBytes = rec.gif ? bytes : null;
+    currentImage = { bytes, crc: rec.crc >>> 0 };
+    if (rec.gif) currentImage.gif = true;
+    $('#fileName').textContent = rec.name || '上次上传的图片';
+    render();
+    if (currentImage) currentImage.fromCache = true;
+    $('#imgStateTxt').textContent = '已恢复上次上传的预览（连接后确认设备）';
+    log('已恢复上次上传的开机图预览；设备里的图仍然在');
+  } catch (e) {
+    log('恢复图片预览失败：' + e.message);
+  }
+}
+
+/* ---------------- CRC32 ---------------- */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (~c) >>> 0;
+}
+
+/* ---------------- 上传 ---------------- */
+async function uploadImage() {
+  if (!currentImage || !connected) return;
+  const bytes = currentImage.bytes;
+  const crc = currentImage.crc;
+  const isGif = !!currentImage.gif;
+  const tag = isGif ? 'GIF' : 'IMG';
+  uploading = true;
+
+  $('#uploadBtn').disabled = true;
+  $('#delImgBtn').disabled = true;
+  setProgress(0);
+  log('开始上传' + (isGif ? ' GIF' : '') + '：' + bytes.length + ' B, crc=' + crc.toString(16));
+
+  try {
+    await sendCmd(tag + ' B ' + bytes.length + ' ' + crc, '#OK', 8000);
+
+    const CHUNK = 2048;
+    for (let off = 0; off < bytes.length; off += CHUNK) {
+      const n = Math.min(CHUNK, bytes.length - off);
+      await sendCmd(tag + ' D ' + n, '#READY', 8000);
+      const okPromise = waitTag('#OK', 15000);
+      okPromise.catch(() => {});          // writeBytes 失败时别留 unhandled rejection
+      await writeBytes(bytes.subarray(off, off + n));
+      await okPromise;
+      setProgress(Math.round((off + n) / bytes.length * 100));
+    }
+
+    const r = await sendCmd(tag + ' E', '#OK', 15000);
+    log(tag + ' E: ' + JSON.stringify(r));
+    toast(isGif ? 'GIF 上传完成，重启后开机播放' : '上传完成，重启后生效');
+    setProgress(100);
+    await cacheUploadedImage();
+    await refreshImg();
+    await refreshInfo();
+  } catch (e) {
+    log('上传失败: ' + e.message);
+    toast('上传失败：' + e.message, true);
+    clearWaiters(new Error('上传中止'));
+    try { await sendCmd(tag + ' A', '#OK', 3000); } catch (e2) {}
+    setProgress(0);
+  } finally {
+    uploading = false;
+    $('#uploadBtn').disabled = !connected || !currentImage;
+    $('#delImgBtn').disabled = !connected || !deviceImgOk;
+    setTimeout(() => setProgress(0), 1200);
+  }
+}
+
+async function deleteImage() {
+  if (!connected) return;
+  if (!confirm('删除设备里的开机图片？下次开机将不再显示图片。')) return;
+  try {
+    await sendCmd('IMG DEL', '#OK', 5000);
+    await cacheClear();
+    clearImagePreview();
+    toast('已删除');
+    await refreshImg();
+    await refreshInfo();
+  } catch (e) {
+    toast('删除失败：' + e.message, true);
+  }
+}
+
+/* ---------------- 显示内容 ---------------- */
+function pageMask() {
+  let mask = 0;
+  $$('.pgbox').forEach(b => { if (b.checked) mask |= Number(b.value); });
+  return mask;
+}
+
+function persistPageDraft() {
+  const mask = pageMask();
+  if (mask) storeSet(LS_PMASK, mask);
+  return mask;
+}
+
+function queuePageSave() {
+  const mask = persistPageDraft();
+  clearTimeout(pageSaveTimer);
+  if (!mask) {
+    $('#pageState').textContent = '至少保留一页';
+    return;
+  }
+  if (!connected || uploading) {
+    $('#pageState').textContent = '本地草稿：0x' + mask.toString(16).toUpperCase() +
+                                  (connected ? '（上传中，稍后保存）' : '（连接后保存）');
+    return;
+  }
+  $('#pageState').textContent = '保存中…';
+  pageSaveTimer = setTimeout(async () => {
+    if (!connected || uploading) return;
+    const m = pageMask();
+    if (!m) return;
+    try {
+      await sendCmd('CFG ' + m, '#OK', 6000);
+      storeSet(LS_PMASK, m);
+      $('#pageState').textContent = '已自动保存：0x' + m.toString(16).toUpperCase();
+    } catch (e) {
+      $('#pageState').textContent = '自动保存失败，点「保存到设备」重试';
+      log('CFG 自动保存失败: ' + e.message);
+    }
+  }, 600);
+}
+
+async function savePages() {
+  clearTimeout(pageSaveTimer);
+  const mask = pageMask();
+  if (!mask) { toast('至少保留一页', true); return; }
+
+  try {
+    await sendCmd('CFG ' + mask, '#OK', 6000);
+    storeSet(LS_PMASK, mask);
+    $('#pageState').textContent = '当前：0x' + mask.toString(16).toUpperCase();
+    toast('显示内容已保存，已立即生效');
+    await refreshInfo();
+  } catch (e) {
+    toast('保存失败：' + e.message, true);
+  }
+}
+
+async function resetPages() {
+  $$('.pgbox').forEach(b => { b.checked = true; });
+  await savePages();
+}
+
+/* ---------------- 设备操作 ---------------- */
+async function rebootDevice() {
+  if (!connected) return;
+  if (!confirm('重启设备？')) return;
+  try {
+    await sendCmd('REBOOT', '#OK', 3000);
+  } catch (e) {
+    // 板子重启时可能来不及回包，继续等
+  }
+  toast('设备重启中…');
+  log('设备重启，等待启动');
+  await sleep(2200);
+  await probeDevice();
+}
+
+/* ---------------- 事件绑定 ---------------- */
+$('#btnConn').onclick = connect;
+$('#btnDisc').onclick = userDisconnect;
+
+function activateTab(key) {
+  if (!['img', 'pages', 'dev'].includes(key)) key = 'img';
+  $$('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === key));
+  ['img', 'pages', 'dev'].forEach(k => $('#tab-' + k).classList.toggle('hide', k !== key));
+}
+
+$$('.tab').forEach(t => t.onclick = () => {
+  activateTab(t.dataset.tab);
+  storeSet(LS_TAB, t.dataset.tab);
+});
+
+$('#drop').onclick = () => $('#file').click();
+$('#file').onchange = e => pickFile(e.target.files[0]);
+['dragenter', 'dragover'].forEach(ev => $('#drop').addEventListener(ev, e => {
+  e.preventDefault(); $('#drop').classList.add('over');
+}));
+['dragleave', 'drop'].forEach(ev => $('#drop').addEventListener(ev, e => {
+  e.preventDefault(); $('#drop').classList.remove('over');
+}));
+$('#drop').addEventListener('drop', e => {
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
+});
+
+$('#fit').onchange = () => { storeSet(LS_FIT, $('#fit').value); render(); };
+$('#bg').oninput = () => { storeSet(LS_BG, $('#bg').value); render(); };
+$('#uploadBtn').onclick = uploadImage;
+$('#delImgBtn').onclick = deleteImage;
+
+$$('.pgbox').forEach(b => b.onchange = queuePageSave);
+$('#btnSavePages').onclick = savePages;
+$('#btnReloadPages').onclick = () => refreshCfg().catch(e => toast(e.message, true));
+$('#btnAllPages').onclick = () => {
+  $$('.pgbox').forEach(b => { b.checked = true; });
+  queuePageSave();
+};
+
+$('#btnInfo').onclick = async () => {
+  try {
+    await refreshInfo();
+    await refreshCfg();
+    await refreshImg();
+    toast('状态已刷新');
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
+$('#btnReboot').onclick = rebootDevice;
+$('#btnResetPages').onclick = resetPages;
+
+window.addEventListener('beforeunload', () => { try { if (port) port.close(); } catch (e) {} });
+
+/* 刷新后恢复：缩放 / 留边颜色 / 当前页签 / 页掩码草稿 */
+(function restoreUI() {
+  const fit = storeGet(LS_FIT, 'cover');
+  $('#fit').value = (fit === 'contain') ? 'contain' : 'cover';
+  const bg = storeGet(LS_BG, '#000000');
+  if (/^#[0-9a-f]{6}$/i.test(bg)) $('#bg').value = bg;
+  activateTab(storeGet(LS_TAB, 'img'));
+  const pm = Number(storeGet(LS_PMASK, 0)) || 0;
+  if (pm > 0) {
+    $$('.pgbox').forEach(b => { b.checked = !!(pm & Number(b.value)); });
+    $('#pageState').textContent = '本地草稿：0x' + pm.toString(16).toUpperCase();
+  }
+})();
+
+setConnected(false);
+log('控制台已加载。正在尝试恢复上次串口…');
+restoreCachedImage();
+autoConnect();
+</script>
+</body>
+</html>
+
+

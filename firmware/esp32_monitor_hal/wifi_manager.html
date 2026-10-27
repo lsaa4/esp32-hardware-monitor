@@ -3,82 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ESP32-S3 副屏 · WiFi 配置</title>
-<style>
-  :root{
-    --bg:#0a0e13; --card:#111a22; --line:#1e2b36; --txt:#e8edf2;
-    --dim:#6b7a89; --acc:#ff2d6f; --ok:#2ee6a0; --warn:#ffb300;
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0; padding:28px 16px; background:var(--bg); color:var(--txt);
-    font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
-    display:flex; justify-content:center;
-  }
-  .wrap{width:100%; max-width:560px}
-  h1{font-size:19px; margin:0 0 4px; letter-spacing:.5px}
-  .sub{color:var(--dim); font-size:12px; margin-bottom:18px}
-  .card{
-    background:var(--card); border:1px solid var(--line); border-radius:12px;
-    padding:14px 16px; margin-bottom:14px;
-  }
-  .row{display:flex; align-items:center; gap:10px}
-  button{
-    background:transparent; color:var(--txt); border:1px solid var(--line);
-    border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer;
-    transition:.15s; font-family:inherit;
-  }
-  button:hover:not(:disabled){border-color:var(--acc); color:var(--acc)}
-  button:disabled{opacity:.35; cursor:not-allowed}
-  button.primary{background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600}
-  button.primary:hover:not(:disabled){filter:brightness(1.12); color:#fff}
-  .dot{width:8px; height:8px; border-radius:50%; background:#333; flex:none}
-  .dot.on{background:var(--ok); box-shadow:0 0 8px var(--ok)}
-  .muted{color:var(--dim); font-size:12px}
-  .kv{display:grid; grid-template-columns:88px 1fr; gap:4px 10px; font-size:13px}
-  .kv b{color:var(--dim); font-weight:400}
-  .net{
-    display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px;
-    cursor:pointer; border:1px solid transparent;
-  }
-  .net:hover{background:#16202a}
-  .net.sel{border-color:var(--acc); background:#1a1119}
-  .net .name{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .lock{color:var(--dim); font-size:11px}
-  .bars{display:flex; align-items:flex-end; gap:2px; height:14px; flex:none}
-  .bars i{width:3px; background:#2c3a47; border-radius:1px}
-  .bars i.on{background:var(--ok)}
-  .bars i:nth-child(1){height:5px}
-  .bars i:nth-child(2){height:8px}
-  .bars i:nth-child(3){height:11px}
-  .bars i:nth-child(4){height:14px}
-  input[type=password], input[type=text]{
-    width:100%; background:#0d141a; border:1px solid var(--line); color:var(--txt);
-    border-radius:8px; padding:9px 12px; font-size:14px; outline:none; font-family:inherit;
-  }
-  input:focus{border-color:var(--acc)}
-  .list{max-height:250px; overflow:auto; margin-top:10px}
-  #log{
-    font:12px/1.7 Consolas,Menlo,monospace; color:var(--dim);
-    max-height:120px; overflow:auto; white-space:pre-wrap; word-break:break-all;
-  }
-  .hide{display:none}
-</style>
+<title>ZENLESS ZONE ZERO // WiFi 配置</title>
+<link rel="stylesheet" href="zzz_theme.css">
 </head>
 <body>
-<div class="wrap">
-  <h1>ESP32-S3 副屏 · WiFi 配置</h1>
-  <div class="sub">通过 USB 串口修改板子要连的 WiFi。需要 Chrome / Edge 89+</div>
-
-  <div class="card">
-    <div class="row">
-      <span class="dot" id="dot"></span>
-      <span id="connTxt" class="muted">串口未连接</span>
-      <span style="flex:1"></span>
-      <button id="btnConn" class="primary">连接串口</button>
-      <button id="btnDisc" disabled>断开</button>
+<div class="ik-bg" aria-hidden="true"><div class="ik-bg-band"><div class="ik-bg-row"><div class="ik-bg-track "><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track rtl"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track offset"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track rtl"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track "><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div><div class="ik-bg-row"><div class="ik-bg-track rtl slow"><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span><span class="ik-bg-text">ZENLESS ZONE ZERO ZENLESS ZONE ZERO ZENLESS ZONE ZERO </span></div></div></div></div>
+<div class="wrap narrow">
+  <header class="top">
+    <div class="brand">
+      <img class="brand-avatar" src="wanzhou_avatar.png" alt="Wanzhou">
+      <div>
+        <div class="brand-name">ZENLESS ZONE <em>ZERO</em></div>
+        <div class="brand-sub">ESP32-S3 · WIFI MANAGER</div>
+      </div>
     </div>
-  </div>
+    <div class="spacer"></div>
+    <span class="status"><span class="dot" id="dot"></span><span id="connTxt">串口未连接</span></span>
+    <button class="primary" id="btnConn">连接串口</button>
+    <button id="btnDisc" disabled>断开</button>
+  </header>
 
   <div class="card">
     <div class="kv">
@@ -105,6 +48,7 @@
   <div class="card" id="panel" style="display:none">
     <div class="muted" style="margin-bottom:8px">已选：<span id="selName" style="color:var(--acc)"></span></div>
     <input type="password" id="pass" placeholder="WiFi 密码（开放网络留空）" autocomplete="off">
+    <div class="muted" style="margin-top:6px;font-size:11px">密码不会保存在浏览器；连接成功后写入板子 NVS。</div>
     <div class="row" style="margin-top:12px">
       <button id="btnJoin" class="primary">连接</button>
       <span class="muted" id="joinTip"></span>
@@ -121,6 +65,11 @@
 const $ = s => document.querySelector(s);
 let port = null, reader = null, writer = null, reading = false, buf = '';
 let selSsid = null;
+let connecting = false;
+const LS_PORT = 'ik_wifi_port';
+const LS_AUTO = 'ik_wifi_autoconnect';
+function storeGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+function storeSet(k, v) { try { localStorage.setItem(k, String(v)); } catch (e) {} }
 
 function log(s){
   const el = $('#log');
@@ -147,24 +96,85 @@ function startPolling(){
 }
 function stopPolling(){ if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
+async function openWifiPort(p, label){
+  port = p;
+  await port.open({ baudRate: 115200 });
+  writer = port.writable.getWriter();
+  reading = true;
+  readLoop();
+  try {
+    const info = port.getInfo ? port.getInfo() : {};
+    storeSet(LS_PORT, JSON.stringify(info));
+  } catch(e) {}
+  storeSet(LS_AUTO, '1');
+  setConnected(true);
+  busy = false;
+  log(label);
+  setTimeout(()=>send('STATUS'), 300);
+  startPolling();
+}
+
 async function connect(){
   if (!('serial' in navigator)) {
     alert('这个浏览器不支持 Web Serial，请用 Chrome 或 Edge');
     return;
   }
+  if (connecting || writer) return;
+  connecting = true;
+  storeSet(LS_AUTO, '1');
   try{
-    port = await navigator.serial.requestPort();
-    await port.open({ baudRate: 115200 });
-    writer = port.writable.getWriter();
-    reading = true;
-    readLoop();
-    setConnected(true);
-    busy = false;
-    log('串口已打开（板子可能会复位一下）');
-    setTimeout(()=>send('STATUS'), 300);
-    startPolling();
+    const granted = await navigator.serial.getPorts().catch(() => []);
+    let saved = {};
+    try { saved = JSON.parse(storeGet(LS_PORT, '{}')) || {}; } catch(e) {}
+    const p = granted.find(x => portInfoMatches(x, saved)) || granted[0] ||
+              await navigator.serial.requestPort();
+    await openWifiPort(p, '串口已打开（板子可能会复位一下）');
   }catch(e){
     log('打开失败: ' + e.message);
+    await disconnect();
+  }finally{
+    connecting = false;
+  }
+}
+
+function portInfoMatches(p, saved){
+  try {
+    const info = p.getInfo ? p.getInfo() : {};
+    return ['usbVendorId','usbProductId','serialNumber'].every(
+      k => (saved[k] ?? null) === (info[k] ?? null)
+    );
+  } catch(e) { return false; }
+}
+
+async function autoConnect(){
+  if (!('serial' in navigator) || port || connecting) return;
+  if (storeGet(LS_AUTO, '1') === '0') {
+    log('上次是手动断开，刷新后不再自动连接');
+    return;
+  }
+  try{
+    const ports = await navigator.serial.getPorts();
+    if(!ports.length){ log('没有已授权的串口，请点「连接串口」'); return; }
+    let saved = {};
+    try { saved = JSON.parse(storeGet(LS_PORT, '{}')) || {}; } catch(e) {}
+    const p = ports.find(x => portInfoMatches(x, saved)) || ports[0];
+    connecting = true;
+    log('检测到已授权串口，自动恢复连接…');
+    for(let i=0;i<3;i++){
+      try{
+        await openWifiPort(p, '串口已自动恢复');
+        return;
+      }catch(e){
+        log('自动恢复失败(' + (i+1) + '/3)：' + e.message);
+        await disconnect();
+        if(i<2) await new Promise(r=>setTimeout(r,450));
+      }
+    }
+    log('自动恢复失败，请点「连接串口」重试');
+  }catch(e){
+    log('自动恢复失败：' + e.message);
+  }finally{
+    connecting = false;
   }
 }
 
@@ -176,6 +186,12 @@ async function disconnect(){
   try{ if(port){ await port.close(); port = null; } }catch(e){}
   setConnected(false);
   log('串口已断开');
+}
+
+async function userDisconnect(){
+  storeSet(LS_AUTO, '0');
+  await disconnect();
+  log('已手动断开；刷新后不会自动连接');
 }
 
 async function send(cmd, quiet){
@@ -298,7 +314,7 @@ function escapeHtml(s){
 }
 
 $('#btnConn').onclick = connect;
-$('#btnDisc').onclick = disconnect;
+$('#btnDisc').onclick = userDisconnect;
 $('#btnStatus').onclick = () => send('STATUS');
 $('#btnScan').onclick = () => {
   busy = true; busyAt = Date.now();
@@ -317,6 +333,10 @@ $('#btnJoin').onclick = () => {
   $('#joinTip').textContent = '正在连接…（最多约 17 秒）';
 };
 $('#pass').addEventListener('keydown', e => { if(e.key === 'Enter') $('#btnJoin').click(); });
+setConnected(false);
+autoConnect();
 </script>
 </body>
 </html>
+
+

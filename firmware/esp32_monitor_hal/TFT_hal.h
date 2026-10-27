@@ -81,6 +81,9 @@ public:
   void drawCircle(int32_t x, int32_t y, int32_t r, uint16_t c);
   void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t c);
   void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint16_t c);
+  // 推送一块 RGB565 像素（内存里是小端 uint16，输出时换成 ST7789 的大端字节序）。
+  // 用于开机图片：一张 320x240 只要一次窗口设置。
+  void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data);
 
   // ---- 文字 ----
   void setTextColor(uint16_t fg)                { _fg = fg; _bgSet = false; }
@@ -161,6 +164,34 @@ inline void TFT_eSPI::pushColor(uint16_t color, uint32_t count) {
     uint32_t n = (count > 2048) ? 2048 : count;
     _tftSpi.writeBytes(buf, n * 2);
     count -= n;
+  }
+  digitalWrite(TFT_CS, HIGH);
+}
+
+// 一次推一块 RGB565 像素。数据是小端 uint16，ST7789 要高位先发，所以逐像素换序。
+// 320x240 全屏 = 150 KB，80 MHz 下约 20 ms；分块 2048 像素避免大缓冲。
+void TFT_eSPI::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
+  if (!data || w <= 0 || h <= 0) return;
+  if (x < 0 || y < 0 || x + w > _w || y + h > _h) return;
+
+  setWindow(x, y, w, h);
+
+  static uint8_t buf[4096];              // 2048 像素
+  uint32_t total = (uint32_t)w * h;
+  uint32_t i = 0;
+
+  digitalWrite(TFT_DC, HIGH);
+  digitalWrite(TFT_CS, LOW);
+  while (i < total) {
+    uint32_t n = total - i;
+    if (n > 2048) n = 2048;
+    for (uint32_t k = 0; k < n; k++) {
+      uint16_t c = data[i + k];
+      buf[k * 2]     = (uint8_t)(c >> 8);
+      buf[k * 2 + 1] = (uint8_t)(c & 0xFF);
+    }
+    _tftSpi.writeBytes(buf, n * 2);
+    i += n;
   }
   digitalWrite(TFT_CS, HIGH);
 }

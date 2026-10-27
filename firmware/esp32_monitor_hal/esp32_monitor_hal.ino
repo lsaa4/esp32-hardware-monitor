@@ -26,9 +26,11 @@
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include "TFT_hal.h"
 #include <Preferences.h>
+#include <FFat.h>
+#include "TFT_hal.h"
 // ================= 配置 =================
+#define FW_VERSION  "1.3.2-zzz"
 // WiFi 账号不要写进代码：复制 secrets.example.h 为 secrets.h 再填，
 // secrets.h 已在 .gitignore 里，不会被提交。
 // 没有 secrets.h 时用空字符串，开机直接进配网流程（wifi_manager.html）。
@@ -66,6 +68,10 @@ uint16_t gPort = PC_PORT;
 
 WiFiUDP     udp;
 Preferences prefs;
+
+// 显示页选择 + 开机图片/上传协议（依赖上面的 tft / prefs）
+#include "display_config.h"
+#include "boot_image.h"
 
 #define MAX_CORE 32
 
@@ -459,7 +465,7 @@ bool fetchMetrics(Metrics& out) {
 
 // ---------------- 界面 ----------------
 // UI_STYLE: 1 = 原始大字版   2 = 卡片仪表盘   3 = 编辑风（对齐 chipiotto.top）
-#define UI_STYLE 4
+#define UI_STYLE 5
 
 // 配色（RGB565）
 #define C_BG     0x0862   // 深底   #0A0E13
@@ -1043,6 +1049,7 @@ void drawOffline() {
 }
 #endif
 
+#if UI_STYLE == 4
 // ================= 风格 4：多面板轮播 =================
 // 每 10 秒自动换一页，右上角圆点指示当前页
 //
@@ -1051,7 +1058,7 @@ void drawOffline() {
 //           —— 不会残留旧字符，也不会整块刷白造成闪烁
 //   · 进度条/柱子：只重画变化的那一段
 #define PAGE_MS 10000
-#define NPAGE   5
+#define NPAGE   PAGE_COUNT
 
 // 翻页擦除动画：每步前进 WIPE_STEP 像素、停顿 WIPE_DELAY_MS 毫秒
 // 320 / 8 × (6+0.6) ≈ 265ms；想更慢就调大 DELAY，想更细就调小 STEP
@@ -1212,7 +1219,7 @@ static void pHeader(uint8_t icon, const char* title) {
   drawIcon(icon, 6, 5, C_INK);
   tft.setTextColor(C_INK, C_PAPER);
   tft.drawString(title, 24, 3, 2);
-  for (int i = 0; i < NPAGE; i++) {
+  for (int i = 0; i < gPageCount; i++) {
     int x = 266 + i * 11;
     if (i == gPage) tft.fillCircle(x, 11, 3, C_ACC);
     else            tft.fillCircle(x, 11, 2, C_EDGE);
@@ -1518,23 +1525,25 @@ static void p5Values() {
   pTextR(33, 312, 214, 1, C_GRAY, b);
 }
 
-static void pFrame(int p) {
+static void pFrame(uint8_t p) {
   switch (p) {
-    case 0: p1Frame(); break;
-    case 1: p2Frame(); break;
-    case 2: p3Frame(); break;
-    case 3: p4Frame(); break;
-    default: p5Frame(); break;
+    case PAGE_OVERVIEW: p1Frame(); break;
+    case PAGE_CPU:      p2Frame(); break;
+    case PAGE_GPU:      p3Frame(); break;
+    case PAGE_STORAGE:  p4Frame(); break;
+    case PAGE_NET:      p5Frame(); break;
+    default: break;
   }
 }
 
-static void pValues(int p) {
+static void pValues(uint8_t p) {
   switch (p) {
-    case 0: p1Values(); break;
-    case 1: p2Values(); break;
-    case 2: p3Values(); break;
-    case 3: p4Values(); break;
-    default: p5Values(); break;
+    case PAGE_OVERVIEW: p1Values(); break;
+    case PAGE_CPU:      p2Values(); break;
+    case PAGE_GPU:      p3Values(); break;
+    case PAGE_STORAGE:  p4Values(); break;
+    case PAGE_NET:      p5Values(); break;
+    default: break;
   }
 }
 
@@ -1543,7 +1552,7 @@ void drawStatic() {
   gPageAt = millis();
   gNeedFull = true;
   tft.fillScreen(C_PAPER);
-  pFrame(gPage);
+  pFrame(gPageList[0]);
 }
 
 // 翻页过渡：粉色扫描线从左往右，把旧页擦成纸白
@@ -1561,16 +1570,16 @@ void drawValues() {
   if (gNeedFull) {
     gNeedFull = false;
     tft.fillScreen(C_PAPER);
-    pFrame(gPage);
+    pFrame(gPageList[gPage]);
   }
-  if (millis() - gPageAt > PAGE_MS) {
-    gPage = (gPage + 1) % NPAGE;
+  if (gPageCount > 1 && millis() - gPageAt > PAGE_MS) {
+    gPage = (gPage + 1) % gPageCount;
     pageWipe();
     gPageAt = millis();
     gLedFlash = millis() + LED_FLASH;
-    pFrame(gPage);
+    pFrame(gPageList[gPage]);
   }
-  pValues(gPage);
+  pValues(gPageList[gPage]);
 }
 
 void drawOffline() {
@@ -1584,6 +1593,12 @@ void drawOffline() {
                  10, 140, 1);
   pFooter("RETRY");
 }
+
+#endif  // UI_STYLE == 4
+
+#if UI_STYLE == 5
+#include "ui_zzz.h"
+#endif
 
 // ---------------- 串口配网协议（配合 wifi_manager.html）----------------
 // 电脑浏览器通过 Web Serial 发命令，ESP32 用 #TAG {json} 回包
@@ -1875,6 +1890,44 @@ static void cmdWifi(const String& arg) {
   drawValues();
 }
 
+// ---------------- 设备信息 / 显示内容 / 图片上传命令 ----------------
+static void cmdInfo() {
+  String j = "{\"fw\":\"" FW_VERSION "\",\"mask\":";
+  j += String(gPageMask);
+  j += ",\"img\":";
+  j += bootImageExists() ? "true" : "false";
+  j += ",\"free\":";
+  j += String(ffatFree());
+  j += "}";
+  sendTag("#INFO", j);
+}
+
+static void cmdCfg(const String& arg) {
+  if (arg.length() == 0) {
+    String j = "{\"mask\":";
+    j += String(gPageMask);
+    j += "}";
+    sendTag("#CFG", j);
+    return;
+  }
+
+  char* end = nullptr;
+  unsigned long mask = strtoul(arg.c_str(), &end, 10);
+  if (end == arg.c_str() || *end != 0 || mask == 0 || mask > PAGE_MASK_ALL) {
+    sendTag("#ERR", "{\"msg\":\"bad mask\"}");
+    return;
+  }
+  if (!pagesSave((uint16_t)mask)) {
+    sendTag("#ERR", "{\"msg\":\"save failed\"}");
+    return;
+  }
+
+  gPage = 0;
+  drawStatic();
+  drawValues();
+  sendTag("#OK", "{\"mask\":" + String(gPageMask) + "}");
+}
+
 static void serialPoll() {
   static String buf;
   while (Serial.available()) {
@@ -1883,6 +1936,58 @@ static void serialPoll() {
       if (buf.length()) {
         if (buf == "STATUS")      cmdStatus();
         else if (buf == "SCAN")   cmdScan();
+        else if (buf == "INFO")   cmdInfo();
+        else if (buf == "CFG?")   cmdCfg("");
+        else if (buf.startsWith("CFG ")) cmdCfg(buf.substring(4));
+        else if (buf == "IMG?")   imgInfo();
+        else if (buf == "IMG E")  imgEnd();
+        else if (buf == "IMG DEL") imgDelete();
+        else if (buf == "IMG A") {
+          imgAbort();
+          sendTag("#OK", "{\"msg\":\"aborted\"}");
+        }
+        else if (buf.startsWith("IMG B ")) {
+          unsigned long bytes = 0, crc = 0;
+          if (sscanf(buf.c_str(), "IMG B %lu %lu", &bytes, &crc) == 2)
+            imgBegin((uint32_t)bytes, (uint32_t)crc);
+          else
+            sendTag("#ERR", "{\"msg\":\"bad IMG B\"}");
+        }
+        else if (buf.startsWith("IMG D ")) {
+          unsigned long n = 0;
+          if (sscanf(buf.c_str(), "IMG D %lu", &n) == 1)
+            imgData((uint32_t)n);
+          else
+            sendTag("#ERR", "{\"msg\":\"bad IMG D\"}");
+        }
+        else if (buf == "GIF E") gifEnd();
+        else if (buf == "GIF DEL") {
+          gifDelete();
+          sendTag("#OK", "{\"msg\":\"gif deleted\"}");
+        }
+        else if (buf == "GIF A") {
+          gifAbort();
+          sendTag("#OK", "{\"msg\":\"gif aborted\"}");
+        }
+        else if (buf.startsWith("GIF B ")) {
+          unsigned long bytes = 0, crc = 0;
+          if (sscanf(buf.c_str(), "GIF B %lu %lu", &bytes, &crc) == 2)
+            gifBegin((uint32_t)bytes, (uint32_t)crc);
+          else
+            sendTag("#ERR", "{\"msg\":\"bad GIF B\"}");
+        }
+        else if (buf.startsWith("GIF D ")) {
+          unsigned long n = 0;
+          if (sscanf(buf.c_str(), "GIF D %lu", &n) == 1)
+            gifData((uint32_t)n);
+          else
+            sendTag("#ERR", "{\"msg\":\"bad GIF D\"}");
+        }
+        else if (buf == "REBOOT") {
+          sendTag("#OK", "{\"msg\":\"reboot\"}");
+          delay(200);
+          ESP.restart();
+        }
         else if (buf == "FORGET") {
           prefs.remove("ssid");
           prefs.remove("pass");
@@ -1905,7 +2010,18 @@ static void serialPoll() {
 // WiFi 连接相关的底层函数（staConnect / connectWithFallback）在「串口配网协议」一节，
 // 因为配网命令和开机流程共用它们。
 
+#if UI_STYLE == 5
+// marquee 独立跑 core 0：主循环被 HTTP 抓数据卡住时，顶栏也不会停
+static void marqueeTask(void *) {
+  for (;;) {
+    drawMarquee();
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+#endif
+
 void setup() {
+  Serial.setRxBufferSize(4096);     // 图片上传分块接收，别用默认 256 B
   Serial.begin(115200);
   delay(400);
   Serial.println("\n\n[BOOT] esp32_monitor start");
@@ -1917,6 +2033,10 @@ void setup() {
   tft.init();
   Serial.println("[BOOT] tft.init done");
   tft.setRotation(3);
+
+#if UI_STYLE == 5
+  zzzTftInit();                       // 先建 TFT 互斥锁，后面 UI / marquee 共用
+#endif
 
 #if PERF_SWEEP
   // 开机扫一遍 SPI 时钟，打印各频率的真实全屏耗时（调试用，会闪 4 下白屏）
@@ -1935,9 +2055,21 @@ void setup() {
   }
 #endif
 
-  tft.fillScreen(C_BG);
-  tft.setTextColor(C_WHITE, C_BG);
-  tft.drawString("WiFi...", 10, 100, 4);
+  // 开机画面：先黑底 BOOT，挂 ffat 后尝试显示 /boot.img（单张 320x240）
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("BOOT", 10, 100, 4);
+
+  bool bootImg = false;
+  if (bootFsBegin()) bootImg = bootImageShow();
+
+  if (bootImg) {
+    bootStatus("WiFi...", TFT_WHITE);
+  } else {
+    tft.fillScreen(C_BG);
+    tft.setTextColor(C_WHITE, C_BG);
+    tft.drawString("WiFi...", 10, 100, 4);
+  }
 
   WiFi.mode(WIFI_STA);
   // 国家码设成 CN：允许 1-13 信道发射。
@@ -1966,6 +2098,7 @@ void setup() {
   }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
   prefs.begin("mon", false);         // 先开 NVS：WiFi 账号可能已经被网页配过
+  pagesLoad();                       // 显示页选择（没有配置时默认 5 页全开）
   gWifiSsid = prefs.getString("ssid", WIFI_SSID);
   gWifiPass = prefs.getString("pass", WIFI_PASS);
   Serial.printf("[BOOT] wifi ssid='%s'%s\n", gWifiSsid.c_str(),
@@ -1991,29 +2124,42 @@ void setup() {
     Serial.print(".");
   }
 
-  tft.fillScreen(C_BG);
+  if (!bootImg) tft.fillScreen(C_BG);
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("\nWiFi OK  %s\n", WiFi.localIP().toString().c_str());
+    if (bootImg) bootStatus("FINDING PC...", TFT_WHITE);
   } else {
     Serial.println("\nWiFi 失败");
-    tft.setTextColor(C_RED, C_BG);
-    tft.drawString("WiFi FAILED", 20, 100, 4);
+    if (bootImg) {
+      bootStatus("WIFI FAILED", TFT_RED);
+    } else {
+      tft.setTextColor(C_RED, C_BG);
+      tft.drawString("WiFi FAILED", 20, 100, 4);
+    }
     delay(3000);
   }
 
   // 自动发现数据源。WiFi 没连上时别白等 8 秒 UDP 广播：等 WiFi 起来后 loop() 补一次
-  tft.setTextColor(C_LABEL, C_BG);
   if (WiFi.status() == WL_CONNECTED) {
-    tft.drawString("FINDING PC...", 20, 100, 4);
+    if (!bootImg) {
+      tft.setTextColor(C_LABEL, C_BG);
+      tft.drawString("FINDING PC...", 20, 100, 4);
+    }
     discoverHost();
   } else {
     gNeedDiscover = true;
   }
 
+  if (bootImg) pageWipe();           // 图片 → 纸白，再进仪表盘
   drawStatic();
   fetchMetrics(m);
   drawValues();
   lastFetch = millis();
+
+#if UI_STYLE == 5
+  xTaskCreatePinnedToCore(marqueeTask, "zzz_marquee", 4096, nullptr, 1, nullptr, 0);
+#endif
 }
 
 void loop() {
@@ -2083,4 +2229,10 @@ void loop() {
 
   delay(50);
 }
+
+
+
+
+
+
 
